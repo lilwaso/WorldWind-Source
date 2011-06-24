@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<!--$Id: build.xml 15092 2011-03-24 21:39:27Z garakl $-->
+
+<project name="servers" default="servers.jarfile">
+
+    <condition property="servers.basedir" value="${worldwind.servers.dir}">
+        <isset property="worldwind.servers.dir"/>
+    </condition>
+    <!-- properties are immutable, so if the "servers.basedir" was initialized above,
+    the next initialization will be ignored -->
+    <property name="servers.basedir" value="${basedir}"/>
+
+    <!-- properties are immutable, so if the "servers.basedir" was initialized above,
+    the next initialization will be ignored -->
+    <property name="worldwind.basedir" value="${servers.basedir}/../"/>
+    <property name="worldwind.buildfile" value="build.xml"/>
+
+    <description>Build script for the NASA World Wind Server Applications</description>
+    <!--
+    ====================================================================================================
+    Global WMS Server build properties.
+    These properties are referenced throughout the buildfile.
+    -->
+    <property name="servers.src.dir" value="${servers.basedir}/src"/>
+    <property name="servers.doc.dir" value="${servers.basedir}/javadoc"/>
+    <property name="servers.classes.dir" value="${servers.basedir}/classes"/>
+    <property name="servers.jarfile" value="worldwind-servers.jar"/>
+    <property name="servers.release.dir" value="${servers.basedir}/servers-release"/>
+
+    <!-- versioning properties -->
+    <property name="major.version" value="0"/>
+    <property name="minor.version" value="6"/>
+    <property name="build.number" value="dev"/>
+    <property name="revision.number" value="00"/>
+
+    <property name="servers.release.zipfile"
+              value="${servers.basedir}/worldwind-servers-${major.version}.${minor.version}.${build.number}.${revision.number}.zip"/>
+
+    <property name="worldwind.servers.drop.dir" value="${servers.basedir}"/>
+
+    <!--
+    ====================================================================================================
+    World Wind setup target.
+    Builds the World Wind library components.
+    The World Wind runtime Jar files are required to compile the WMS source.
+    -->
+
+    <target name="worldwind-setup"
+            description="Build the World Wind library components">
+        <ant dir="${worldwind.basedir}" antfile="${worldwind.buildfile}" target="worldwind.jarfile" inheritAll="false"/>
+    </target>
+
+    <target name="worldwind-setup.shared"
+            description="Build the World Wind library components">
+        <ant dir="${worldwind.basedir}" antfile="${worldwind.buildfile}" target="worldwind.jarfile" inheritAll="false"/>
+    </target>
+
+    <target name="clean.worldwind-setup"
+            description="Remove all build-generated library files and directories">
+        <ant dir="${worldwind.basedir}" antfile="${worldwind.buildfile}" target="clean.build" inheritAll="false"/>
+    </target>
+
+    <!--
+    ====================================================================================================
+    NASA World Wind Server Applications build targets.
+    ====================================================================================================
+    Compiles the NASA World Wind Server Applications source,
+    Generates NASA World Wind Server Applications API documentation,
+    and builds NASA World Wind Server Applications Jar packages.
+    -->
+
+    <!-- NASA World Wind Server Applications library. -->
+    <target name="servers.compile" depends="worldwind-setup"
+            description="Compile the NASA World Wind Server Applications source">
+        <mkdir dir="${servers.classes.dir}"/>
+        <javac destdir="${servers.classes.dir}" fork="true" includeantruntime="false">
+            <src path="${servers.src.dir}"/>
+            <classpath>
+                <pathelement location="${worldwind.basedir}/worldwind.jar"/>
+                <pathelement location="${worldwind.basedir}/jogl.jar"/>
+                <pathelement location="${worldwind.basedir}/gluegen-rt.jar"/>
+                <pathelement location="${worldwind.basedir}/gdal.jar"/>
+            </classpath>
+        </javac>
+    </target>
+
+    <!-- Generate the NASA World Wind Server Applications API documentation. -->
+    <target name="servers.javadocs"
+            depends="servers.clean.javadocs,worldwind-setup"
+            description="Generate the NASA World Wind Server Applications API documentation"
+            >
+        <javadoc packagenames="gov.nasa.worldwind.*" defaultexcludes="yes"
+                 splitindex="true" protected="true" nodeprecated="true" version="false" author="false" use="true"
+                 overview="${servers.src.dir}/overview.html"
+                 windowtitle="NASA World Wind Server Applications"
+                 doctitle="NASA World Wind Server Applications API"
+                 header="NASA World Wind Server Applications"
+                 destdir="${servers.doc.dir}">
+            <sourcepath path="${servers.src.dir}"/>
+            <classpath>
+                <pathelement location="${worldwind.basedir}/worldwind.jar"/>
+                <pathelement location="${worldwind.basedir}/jogl.jar"/>
+                <pathelement location="${worldwind.basedir}/gluegen-rt.jar"/>
+                <pathelement location="${worldwind.basedir}/gdal.jar"/>
+                <!--<fileset dir="${servers.basedir}/library"/>-->
+            </classpath>
+            <link href="http://download.oracle.com/javase/6/docs/api/"/>
+        </javadoc>
+    </target>
+
+    <!-- Builds the NASA World Wind Server Applications library Jar file. -->
+    <target name="servers.jarfile" depends="servers.compile"
+            description="Build the NASA World Wind Server Applications library">
+        <jar jarfile="${servers.basedir}/${servers.jarfile}">
+            <fileset dir="${servers.classes.dir}">
+                <include name="**"/>
+            </fileset>
+        </jar>
+    </target>
+
+    <!-- Deletes files and directories created by the NASA World Wind Server Applications build targets. -->
+    <target name="servers.clean.classes">
+        <delete dir="${servers.classes.dir}"/>
+    </target>
+    <target name="servers.clean.javadocs">
+        <delete dir="${servers.doc.dir}"/>
+    </target>
+    <target name="servers.clean.jarfile">
+        <delete file="${servers.basedir}/${servers.jarfile}"/>
+    </target>
+    <target name="servers.clean.release">
+        <delete dir="${servers.release.dir}"/>
+        <delete file="${servers.release.zipfile}"/>
+    </target>
+
+
+    <!--
+    ====================================================================================================
+    Release targets.
+    ====================================================================================================
+    Builds the NASA World Wind Server Applications release, and creates the release archive.
+    -->
+
+    <!-- Creates the NASA World Wind Server Applications release directory. -->
+    <target name="servers.release"
+            depends="servers.clean.all,servers.jarfile,servers.javadocs"
+            description="Create the WMS Server release">
+        <mkdir dir="${servers.release.dir}"/>
+        <copy todir="${servers.release.dir}">
+            <fileset dir="${servers.basedir}">
+                <include name="${servers.jarfile}"/>
+                <include name="src/**"/>
+            </fileset>
+            <fileset dir="${servers.basedir}/release">
+            </fileset>
+        </copy>
+        <mkdir dir="${servers.release.dir}/doc"/>
+        <copy todir="${servers.release.dir}/doc">
+            <fileset dir="${servers.doc.dir}">
+                <include name="**"/>
+            </fileset>
+        </copy>
+        <mkdir dir="${servers.release.dir}/lib"/>
+        <copy todir="${servers.release.dir}/lib">
+            <!--<fileset dir="${servers.basedir}/library">-->
+            <!--<include name="**"/>-->
+            <!--</fileset>-->
+            <fileset dir="${worldwind.basedir}">
+                <include name="worldwind.jar"/>
+                <include name="jogl.jar"/>
+                <include name="gluegen-rt.jar"/>
+                <include name="gdal.jar"/>
+                <include name="*.jnilib"/>
+                <include name="*.dll"/>
+                <include name="*.so"/>
+            </fileset>
+        </copy>
+    </target>
+
+    <!-- Packages the WMS Server release components into a zip file. -->
+    <target name="servers.release.zipfile" depends="servers.release"
+            description="Package the NASA World Wind Server Applications release">
+        <zip destfile="${servers.release.zipfile}">
+            <fileset dir="${servers.release.dir}"/>
+        </zip>
+    </target>
+
+    <!-- Drops the WMS release package to a local drop folder for consumption -->
+
+    <target name="servers.drop.zip" depends="servers.release.zipfile"
+            description="Prepares zipped up NASA World Wind Server Applications package for release">
+        <copy file="${servers.release.zipfile}" todir="${worldwind.servers.drop.dir}"/>
+    </target>
+
+    <!--
+    ====================================================================================================
+    Clean Targets.
+    Removes any files and directories creating by this build script.
+    -->
+    <target name="servers.clean.all"
+            depends="clean.worldwind-setup,servers.clean.classes,servers.clean.javadocs,servers.clean.jarfile,servers.clean.release"
+            description="Remove all build-generated files and directories"/>
+</project>
