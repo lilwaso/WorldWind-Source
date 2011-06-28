@@ -12,6 +12,7 @@ import gov.nasa.worldwind.render.*;
 
 import java.awt.*;
 import java.nio.DoubleBuffer;
+import java.util.ArrayList;
 
 /**
  * This interface provides access to individual terrain tiles, which are contained in a {@link SectorGeometryList}.
@@ -285,4 +286,35 @@ public interface SectorGeometry extends Renderable
 //    // Get tessellation pieces inside an elliptical cylinder
 //    ExtractedShapeDescription getIntersectingTessellationPieces(Vec4 Cxyz, Vec4 uHat, Vec4 vHat,
 //        double uRadius, double vRadius);
+    public static class BoundaryEdge
+  {
+    public Vec4[] vertices;
+    public int i1;
+    public int i2;
+    public Vec4 toMidPoint;
+
+    public BoundaryEdge(Vec4[] paramArrayOfVec4, int paramInt1, int paramInt2)
+    {
+      this(paramArrayOfVec4, paramInt1, paramInt2, null);
+    }
+
+    public BoundaryEdge(Vec4[] paramArrayOfVec4, int paramInt1, int paramInt2, Vec4 paramVec4)
+    {
+      this.vertices = paramArrayOfVec4;
+      this.i1 = paramInt1;
+      this.i2 = paramInt2;
+      this.toMidPoint = paramVec4;
+    }
+  }
+      public static class ExtractedShapeDescription
+  {
+    public ArrayList<Vec4[]> interiorPolys;
+    public ArrayList<SectorGeometry.BoundaryEdge> shapeOutline;
+
+    public ExtractedShapeDescription(ArrayList<Vec4[]> paramArrayList, ArrayList<SectorGeometry.BoundaryEdge> paramArrayList1)
+    {
+      this.interiorPolys = paramArrayList;
+      this.shapeOutline = paramArrayList1;
+    }
+  }
 }

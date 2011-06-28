@@ -235,4 +235,14 @@ public interface Globe extends WWObject, Extent
      * @return true if the given point is above the given elevation, otherwise false.
      */
     boolean isPointAboveElevation(Vec4 point, double elevation);
+    
+    public abstract Matrix computeTransformToPosition(Angle paramAngle1, Angle paramAngle2, double paramDouble);
+
+    public abstract Matrix computeTransformToPosition(Position paramPosition);
+    
+    public abstract Cylinder computeBoundingCylinder(double paramDouble, Sector paramSector);
+
+    public abstract Cylinder computeBoundingCylinder(double paramDouble1, Sector paramSector, double paramDouble2, double paramDouble3);
+
+
 }

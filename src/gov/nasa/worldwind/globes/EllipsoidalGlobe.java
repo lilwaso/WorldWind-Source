@@ -48,6 +48,22 @@ public class EllipsoidalGlobe extends WWObjectImpl implements Globe
         this.tessellator = (Tessellator) WorldWind.createConfigurationComponent(AVKey.TESSELLATOR_CLASS_NAME);
     }
 
+    public Matrix computeTransformToPosition(Angle paramAngle1, Angle paramAngle2, double paramDouble) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    public Matrix computeTransformToPosition(Position paramPosition) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    public Cylinder computeBoundingCylinder(double paramDouble, Sector paramSector) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
+    public Cylinder computeBoundingCylinder(double paramDouble1, Sector paramSector, double paramDouble2, double paramDouble3) {
+        throw new UnsupportedOperationException("Not supported yet.");
+    }
+
     protected class StateKey implements GlobeStateKey
     {
         protected Globe globe;

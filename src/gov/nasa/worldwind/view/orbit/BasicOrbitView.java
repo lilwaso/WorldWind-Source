@@ -27,6 +27,7 @@ public class BasicOrbitView extends BasicView implements OrbitView
     private boolean viewOutOfFocus;
     // Stateless helper classes.
     protected final OrbitViewCollisionSupport collisionSupport = new OrbitViewCollisionSupport();
+    OrbitViewModel orbitViewModel;
 
     public BasicOrbitView()
     {
@@ -868,5 +869,9 @@ public class BasicOrbitView extends BasicView implements OrbitView
     public void addCenterAnimator(Position begin, Position end, long lengthMillis, boolean smoothed)
     {
         ((OrbitViewInputHandler) this.viewInputHandler).addCenterAnimator(begin, end, lengthMillis, smoothed);
+    }
+    public OrbitViewModel getOrbitViewModel()
+    {
+    return this.orbitViewModel;
     }
 }
