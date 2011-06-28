@@ -1,0 +1,14 @@
+libgdalalljni.so built on Ubuntu 10.04.2 (i386)
+
+------------------------------------------------------------------
+GDAL version 1.7.2
+PROJ4 version 4.7.0
+MRSID DecodeSDK Geo_DSDK-7.0.0.2167.linux.x86-32.gcc41
+------------------------------------------------------------------
+Linux 2.6.32-28-generic #55-Ubuntu SMP i686 GNU/Linux
+Apache Ant(TM) version 1.8.2 
+SWIG 2.0.1
+SUN JDK build 1.6.0_24-b07
+gcc 4.4.3
+------------------------------------------------------------------
+
