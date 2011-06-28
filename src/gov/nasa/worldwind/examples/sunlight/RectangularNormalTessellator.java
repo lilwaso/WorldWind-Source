@@ -1519,7 +1519,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
     implements SectorGeometry
   {
 
-        private static void access$1502(RectTile paramRectTile, RenderInfo renderInfo) {
+        /*private static void access$1502(RectTile paramRectTile, RenderInfo renderInfo) {
             throw new UnsupportedOperationException("Not yet implemented");
         }
 
@@ -1529,7 +1529,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
 
         private static void access$2602(RectTile paramRectTile, int rGB) {
             throw new UnsupportedOperationException("Not yet implemented");
-        }
+        }*/
     private final RectangularNormalTessellator tessellator;
     private final int level;
     private final Sector sector;
