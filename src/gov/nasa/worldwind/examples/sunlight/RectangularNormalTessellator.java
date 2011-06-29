@@ -38,7 +38,7 @@ import java.nio.Buffer;
 import java.nio.DoubleBuffer;
 import java.nio.IntBuffer;
 import java.util.ArrayList;
-//import java.util.ArrayList<Lgov.nasa.worldwind.examples.sunlight.RectangularNormalTessellator.RectTile;>;
+import gov.nasa.worldwind.examples.sunlight.RectangularNormalTessellator.RectTile;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -264,20 +264,24 @@ public class RectangularNormalTessellator extends WWObjectImpl
     return new CacheKey(paramDrawContext, paramRectTile.sector, paramRectTile.density);
   }
 
-  private void makeVerts(DrawContext paramDrawContext, RectTile paramRectTile)
-  {
-    MemoryCache localMemoryCache = WorldWind.getMemoryCache(CACHE_ID);
-    CacheKey localCacheKey = createCacheKey(paramDrawContext, paramRectTile);
-    RectTile.access$1502(paramRectTile, (RenderInfo)localMemoryCache.getObject(localCacheKey));
-    if ((paramRectTile.ri != null) && (RectTile.access$1500(paramRectTile).time >= System.currentTimeMillis() - 1000L))
-      return;
-    RectTile.access$1502(paramRectTile, buildVerts(paramDrawContext, paramRectTile, this.makeTileSkirts));
-    if (paramRectTile.ri != null)
+  private void makeVerts(DrawContext dc, RectTile tile)
     {
-      localCacheKey = createCacheKey(paramDrawContext, paramRectTile);
-      localMemoryCache.add(localCacheKey, paramRectTile.ri, paramRectTile.ri.getSizeInBytes());
+        // First see if the vertices have been previously computed and are in the cache. Since the elevation model
+        // can change between frames, regenerate and re-cache vertices every second.
+        MemoryCache cache = WorldWind.getMemoryCache(CACHE_ID);
+        CacheKey cacheKey = this.createCacheKey(dc, tile);
+        tile.ri = (RenderInfo) cache.getObject(cacheKey);
+        if (tile.ri != null && tile.ri.time >= System.currentTimeMillis() - 1000) // Regenerate cache after one second
+            return;
+
+        tile.ri = this.buildVerts(dc, tile, this.makeTileSkirts);
+        if (tile.ri != null)
+        {
+            cacheKey = this.createCacheKey(dc, tile);
+            cache.add(cacheKey, tile.ri, tile.ri.getSizeInBytes());
+        }
     }
-  }
+
 
   public RenderInfo buildVerts(DrawContext paramDrawContext, RectTile paramRectTile, boolean paramBoolean)
   {
@@ -440,15 +444,15 @@ public class RectangularNormalTessellator extends WWObjectImpl
       Logging.logger().severe((String)localObject1);
       throw new IllegalStateException((String)localObject1);
     }
-    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, RectTile.access$1500(paramRectTile).referenceCenter);
+    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, paramRectTile.ri.referenceCenter);
     if ((!paramDrawContext.isPickingMode()) && (this.lightDirection != null))
       beginLighting(paramDrawContext);
     Object localObject1 = paramDrawContext.getGL();
     ((GL)localObject1).glPushClientAttrib(2);
     ((GL)localObject1).glEnableClientState(32884);
-    ((GL)localObject1).glVertexPointer(3, 5130, 0, RectTile.access$1500(paramRectTile).vertices.rewind());
+    ((GL)localObject1).glVertexPointer(3, 5130, 0, paramRectTile.ri.vertices.rewind());
     ((GL)localObject1).glEnableClientState(32885);
-    ((GL)localObject1).glNormalPointer(5130, 0, RectTile.access$1500(paramRectTile).normals.rewind());
+    ((GL)localObject1).glNormalPointer(5130, 0, paramRectTile.ri.normals.rewind());
     for (int i = 0; i < paramInt; i++)
     {
       ((GL)localObject1).glClientActiveTexture(33984 + i);
@@ -457,15 +461,15 @@ public class RectangularNormalTessellator extends WWObjectImpl
       if ((localObject2 != null) && ((localObject2 instanceof DoubleBuffer)))
         ((GL)localObject1).glTexCoordPointer(2, 5130, 0, ((DoubleBuffer)localObject2).rewind());
       else
-        ((GL)localObject1).glTexCoordPointer(2, 5130, 0, RectTile.access$1500(paramRectTile).texCoords.rewind());
+        ((GL)localObject1).glTexCoordPointer(2, 5130, 0, paramRectTile.ri.texCoords.rewind());
     }
-    ((GL)localObject1).glDrawElements(5, RectTile.access$1500(paramRectTile).indices.limit(), 5125, RectTile.access$1500(paramRectTile).indices.rewind());
+    ((GL)localObject1).glDrawElements(5, paramRectTile.ri.indices.limit(), 5125, paramRectTile.ri.indices.rewind());
     ((GL)localObject1).glDisableClientState(32885);
     ((GL)localObject1).glPopClientAttrib();
     if ((!paramDrawContext.isPickingMode()) && (this.lightDirection != null))
       endLighting(paramDrawContext);
     paramDrawContext.getView().popReferenceCenter(paramDrawContext);
-    return RectTile.access$1500(paramRectTile).indices.limit() - 2;
+    return paramRectTile.ri.indices.limit() - 2;
   }
 
   private void beginLighting(DrawContext paramDrawContext)
@@ -510,9 +514,9 @@ public class RectangularNormalTessellator extends WWObjectImpl
       Logging.logger().severe((String)localObject);
       throw new IllegalStateException((String)localObject);
     }
-    Object localObject = getIndices(RectTile.access$1500(paramRectTile).density);
+    Object localObject = getIndices(paramRectTile.ri.density);
     ((IntBuffer)localObject).rewind();
-    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, RectTile.access$1500(paramRectTile).referenceCenter);
+    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, paramRectTile.ri.referenceCenter);
     GL localGL = paramDrawContext.getGL();
     localGL.glPushAttrib(270601);
     localGL.glEnable(3042);
@@ -527,7 +531,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
     {
       localGL.glPushClientAttrib(2);
       localGL.glEnableClientState(32884);
-      localGL.glVertexPointer(3, 5130, 0, RectTile.access$1500(paramRectTile).vertices);
+      localGL.glVertexPointer(3, 5130, 0, paramRectTile.ri.vertices);
       localGL.glDrawElements(5, ((IntBuffer)localObject).limit(), 5125, (Buffer)localObject);
       localGL.glPopClientAttrib();
     }
@@ -558,25 +562,32 @@ public class RectangularNormalTessellator extends WWObjectImpl
       ((Cylinder)localExtent).render(paramDrawContext);
   }
 
-  private PickedObject[] pick(DrawContext paramDrawContext, RectTile paramRectTile, List<? extends Point> paramList)
-  {
-    if (paramDrawContext == null)
-    {
-      String localObject = Logging.getMessage("nullValue.DrawContextIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalArgumentException((String)localObject);
-    }
-    if (paramList.size() == 0)
-      return null;
-    if (paramRectTile.ri == null)
-      return null;
-    Object localObject = new PickedObject[paramList.size()];
-    renderTrianglesWithUniqueColors(paramDrawContext, paramRectTile);
-    for (int i = 0; i < paramList.size(); i++)
-        
-    localObject[i] = resolvePick(paramDrawContext, paramRectTile, (Point)paramList.get(i));
-    return (PickedObject)localObject;
-  }
+   private PickedObject[] pick(DrawContext dc, RectTile tile,
+                        List<? extends Point> pickPoints)
+        {
+                if (dc == null)
+                {
+                        String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+                        Logging.logger().severe(msg);
+                        throw new IllegalArgumentException(msg);
+                }
+
+                if (pickPoints.size() == 0)
+                        return null;
+
+                if (tile.ri == null)
+                        return null;
+
+                PickedObject[] pos = new PickedObject[pickPoints.size()];
+                this.renderTrianglesWithUniqueColors(dc, tile);
+                for (int i = 0; i < pickPoints.size(); i++)
+                {
+                        pos[i] = this.resolvePick(dc, tile, pickPoints.get(i));
+                }
+
+                return pos;
+        }
+
 
   private void pick(DrawContext paramDrawContext, RectTile paramRectTile, Point paramPoint)
   {
@@ -602,30 +613,30 @@ public class RectangularNormalTessellator extends WWObjectImpl
       Logging.logger().severe((String)localObject);
       throw new IllegalStateException((String)localObject);
     }
-    if (RectTile.access$1500(paramRectTile).vertices == null)
+    if (paramRectTile.ri.vertices == null)
       return;
-    RectTile.access$1500(paramRectTile).vertices.rewind();
-    RectTile.access$1500(paramRectTile).indices.rewind();
+    paramRectTile.ri.vertices.rewind();
+    paramRectTile.ri.indices.rewind();
     Object localObject = paramDrawContext.getGL();
-    if (null != RectTile.access$1500(paramRectTile).referenceCenter)
-      paramDrawContext.getView().pushReferenceCenter(paramDrawContext, RectTile.access$1500(paramRectTile).referenceCenter);
-    RectTile.access$2502(paramRectTile, paramDrawContext.getUniquePickColor().getRGB());
-    int i = RectTile.access$1500(paramRectTile).indices.capacity() - 2;
+    if (null != paramRectTile.ri.referenceCenter)
+      paramDrawContext.getView().pushReferenceCenter(paramDrawContext, paramRectTile.ri.referenceCenter);
+    paramRectTile.minColorCode = paramDrawContext.getUniquePickColor().getRGB();
+    int i = paramRectTile.ri.indices.capacity() - 2;
     ((GL)localObject).glBegin(4);
     for (int j = 0; j < i; j++)
     {
       Color localColor = paramDrawContext.getUniquePickColor();
       ((GL)localObject).glColor3ub((byte)(localColor.getRed() & 0xFF), (byte)(localColor.getGreen() & 0xFF), (byte)(localColor.getBlue() & 0xFF));
-      int k = 3 * RectTile.access$1500(paramRectTile).indices.get(j);
-      ((GL)localObject).glVertex3d(RectTile.access$1500(paramRectTile).vertices.get(k), RectTile.access$1500(paramRectTile).vertices.get(k + 1), RectTile.access$1500(paramRectTile).vertices.get(k + 2));
-      k = 3 * RectTile.access$1500(paramRectTile).indices.get(j + 1);
-      ((GL)localObject).glVertex3d(RectTile.access$1500(paramRectTile).vertices.get(k), RectTile.access$1500(paramRectTile).vertices.get(k + 1), RectTile.access$1500(paramRectTile).vertices.get(k + 2));
-      k = 3 * RectTile.access$1500(paramRectTile).indices.get(j + 2);
-      ((GL)localObject).glVertex3d(RectTile.access$1500(paramRectTile).vertices.get(k), RectTile.access$1500(paramRectTile).vertices.get(k + 1), RectTile.access$1500(paramRectTile).vertices.get(k + 2));
+      int k = 3 * paramRectTile.ri.indices.get(j);
+      ((GL)localObject).glVertex3d(paramRectTile.ri.vertices.get(k), paramRectTile.ri.vertices.get(k + 1), paramRectTile.ri.vertices.get(k + 2));
+      k = 3 * paramRectTile.ri.indices.get(j + 1);
+      ((GL)localObject).glVertex3d(paramRectTile.ri.vertices.get(k), paramRectTile.ri.vertices.get(k + 1), paramRectTile.ri.vertices.get(k + 2));
+      k = 3 * paramRectTile.ri.indices.get(j + 2);
+      ((GL)localObject).glVertex3d(paramRectTile.ri.vertices.get(k), paramRectTile.ri.vertices.get(k + 1), paramRectTile.ri.vertices.get(k + 2));
     }
     ((GL)localObject).glEnd();
-    RectTile.access$2602(paramRectTile, paramDrawContext.getUniquePickColor().getRGB());
-    if (null != RectTile.access$1500(paramRectTile).referenceCenter)
+    paramRectTile.maxColorCode = paramDrawContext.getUniquePickColor().getRGB();
+    if (null != paramRectTile.ri.referenceCenter)
       paramDrawContext.getView().popReferenceCenter(paramDrawContext);
   }
 
@@ -636,17 +647,17 @@ public class RectangularNormalTessellator extends WWObjectImpl
       return null;
     double d1 = 9.999999747378752E-006D;
     int j = i - paramRectTile.minColorCode - 1;
-    if ((RectTile.access$1500(paramRectTile).indices == null) || (j >= RectTile.access$1500(paramRectTile).indices.capacity() - 2))
+    if ((paramRectTile.ri.indices == null) || (j >= paramRectTile.ri.indices.capacity() - 2))
       return null;
-    double d2 = RectTile.access$1500(paramRectTile).referenceCenter.x;
-    double d3 = RectTile.access$1500(paramRectTile).referenceCenter.y;
-    double d4 = RectTile.access$1500(paramRectTile).referenceCenter.z;
-    int k = 3 * RectTile.access$1500(paramRectTile).indices.get(j);
-    Vec4 localVec41 = new Vec4(RectTile.access$1500(paramRectTile).vertices.get(k++) + d2, RectTile.access$1500(paramRectTile).vertices.get(k++) + d3, RectTile.access$1500(paramRectTile).vertices.get(k) + d4);
-    k = 3 * RectTile.access$1500(paramRectTile).indices.get(j + 1);
-    Vec4 localVec42 = new Vec4(RectTile.access$1500(paramRectTile).vertices.get(k++) + d2, RectTile.access$1500(paramRectTile).vertices.get(k++) + d3, RectTile.access$1500(paramRectTile).vertices.get(k) + d4);
-    k = 3 * RectTile.access$1500(paramRectTile).indices.get(j + 2);
-    Vec4 localVec43 = new Vec4(RectTile.access$1500(paramRectTile).vertices.get(k++) + d2, RectTile.access$1500(paramRectTile).vertices.get(k++) + d3, RectTile.access$1500(paramRectTile).vertices.get(k) + d4);
+    double d2 = paramRectTile.ri.referenceCenter.x;
+    double d3 = paramRectTile.ri.referenceCenter.y;
+    double d4 = paramRectTile.ri.referenceCenter.z;
+    int k = 3 * paramRectTile.ri.indices.get(j);
+    Vec4 localVec41 = new Vec4(paramRectTile.ri.vertices.get(k++) + d2, paramRectTile.ri.vertices.get(k++) + d3, paramRectTile.ri.vertices.get(k) + d4);
+    k = 3 * paramRectTile.ri.indices.get(j + 1);
+    Vec4 localVec42 = new Vec4(paramRectTile.ri.vertices.get(k++) + d2, paramRectTile.ri.vertices.get(k++) + d3, paramRectTile.ri.vertices.get(k) + d4);
+    k = 3 * paramRectTile.ri.indices.get(j + 2);
+    Vec4 localVec43 = new Vec4(paramRectTile.ri.vertices.get(k++) + d2, paramRectTile.ri.vertices.get(k++) + d3, paramRectTile.ri.vertices.get(k) + d4);
     Vec4 localVec44 = localVec42.subtract3(localVec41);
     Vec4 localVec45 = localVec43.subtract3(localVec41);
     Vec4 localVec46 = localVec44.cross3(localVec45);
@@ -664,114 +675,169 @@ public class RectangularNormalTessellator extends WWObjectImpl
     return new PickedObject(paramPoint, i, localPosition2, localPosition1.getLatitude(), localPosition1.getLongitude(), d8, true);
   }
 
-  private Intersection[] intersect(RectTile paramRectTile, Line paramLine)
-  {
-    if (paramLine == null)
+private Intersection[] intersect(RectTile tile, Line line)
     {
-      String localObject = Logging.getMessage("nullValue.LineIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalArgumentException((String)localObject);
+        if (line == null)
+        {
+            String msg = Logging.getMessage("nullValue.LineIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
+
+        if (tile.ri.vertices == null)
+            return null;
+
+        // Compute 'vertical' plane perpendicular to the ground, that contains the ray
+        Vec4 normalV = line.getDirection().cross3(globe.computeSurfaceNormalAtPoint(line.getOrigin()));
+        Plane verticalPlane = new Plane(normalV.x(),  normalV.y(),  normalV.z(),  -line.getOrigin().dot3(normalV));
+        if (!tile.getExtent().intersects(verticalPlane))
+            return null;
+
+        // Compute 'horizontal' plane perpendicular to the vertical plane, that contains the ray
+        Vec4 normalH = line.getDirection().cross3(normalV);
+        Plane horizontalPlane = new Plane(normalH.x(),  normalH.y(),  normalH.z(),  -line.getOrigin().dot3(normalH));
+        if (!tile.getExtent().intersects(horizontalPlane))
+            return null;
+
+        Intersection[] hits;
+        ArrayList<Intersection> list = new ArrayList<Intersection>();
+
+        int[] indices = new int[tile.ri.indices.limit()];
+        double[] coords = new double[tile.ri.vertices.limit()];
+        tile.ri.indices.rewind();
+        tile.ri.vertices.rewind();
+        tile.ri.indices.get(indices, 0, indices.length);
+        tile.ri.vertices.get(coords, 0, coords.length);
+        tile.ri.indices.rewind();
+        tile.ri.vertices.rewind();
+
+        int trianglesNum = tile.ri.indices.capacity() - 2;
+        double centerX = tile.ri.referenceCenter.x;
+        double centerY = tile.ri.referenceCenter.y;
+        double centerZ = tile.ri.referenceCenter.z;
+
+        // Compute maximum cell size based on tile delta lat, density and globe radius
+        double cellSide = tile.getSector().getDeltaLatRadians() * globe.getRadius() / density;
+        double maxCellRadius = Math.sqrt(cellSide * cellSide * 2) / 2;   // half cell diagonal
+
+        // Compute maximum elevation difference - assume cylinder as Extent
+        double elevationSpan = ((Cylinder)tile.getExtent()).getCylinderHeight();
+
+        // TODO: ignore back facing triangles?
+        // Loop through all tile cells - triangle pairs
+        int startIndice = (density + 2) * 2 + 6; // skip firts skirt row and a couple degenerate cells
+        int endIndice = trianglesNum - startIndice; // ignore last skirt row and a couple degenerate cells
+        int k = -1;
+        for (int i = startIndice; i < endIndice; i += 2)
+        {
+            // Skip skirts and degenerate triangle cells - based on indice sequence.
+            k = k == density - 1 ? -4 : k + 1; // density x terrain cells interleaved with 4 skirt and degenerate cells.
+            if (k < 0)
+                continue;
+
+            // Triangle pair diagonal - v1 & v2
+            int vIndex = 3 * indices[i + 1];
+            Vec4 v1 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            vIndex = 3 * indices[i + 2];
+            Vec4 v2 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            Vec4 cellCenter = Vec4.mix3(.5, v1, v2);
+
+            // Test cell center distance to vertical plane
+            if (Math.abs(verticalPlane.distanceTo(cellCenter)) > maxCellRadius)
+                continue;
+
+            // Test cell center distance to horizontal plane
+            if (Math.abs(horizontalPlane.distanceTo(cellCenter)) > elevationSpan)
+                continue;
+
+            // Prepare to test triangles - get other two vertices v0 & v3
+            Vec4 p;
+            vIndex = 3 * indices[i];
+            Vec4 v0 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            vIndex = 3 * indices[i + 3];
+            Vec4 v3 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            // Test triangle 1 intersection w ray
+            Triangle t = new Triangle(v0, v1, v2);
+            if ((p = t.intersect(line)) != null)
+            {
+                list.add(new Intersection(p, false));
+            }
+
+            // Test triangle 2 intersection w ray
+            t = new Triangle(v1, v2, v3);
+            if ((p = t.intersect(line)) != null)
+            {
+                list.add(new Intersection(p, false));
+            }
+        }
+
+        int numHits = list.size();
+        if (numHits == 0)
+            return null;
+
+        hits = new Intersection[numHits];
+        list.toArray(hits);
+
+        final Vec4 origin = line.getOrigin();
+        Arrays.sort(hits, new Comparator<Intersection>()
+        {
+            public int compare(Intersection i1, Intersection i2)
+            {
+                if (i1 == null && i2 == null)
+                    return 0;
+                if (i2 == null)
+                    return -1;
+                if (i1 == null)
+                    return 1;
+
+                Vec4 v1 = i1.getIntersectionPoint();
+                Vec4 v2 = i2.getIntersectionPoint();
+                double d1 = origin.distanceTo3(v1);
+                double d2 = origin.distanceTo3(v2);
+                return Double.compare(d1, d2);
+            }
+        });
+
+        return hits;
     }
-    if (RectTile.access$1500(paramRectTile).vertices == null)
-      return null;
-    Object localObject = paramLine.getDirection().cross3(this.globe.computeSurfaceNormalAtPoint(paramLine.getOrigin()));
-    Plane localPlane1 = new Plane(((Vec4)localObject).x(), ((Vec4)localObject).y(), ((Vec4)localObject).z(), -paramLine.getOrigin().dot3((Vec4)localObject));
-    if (!paramRectTile.getExtent().intersects(localPlane1))
-      return null;
-    Vec4 localVec41 = paramLine.getDirection().cross3((Vec4)localObject);
-    Plane localPlane2 = new Plane(localVec41.x(), localVec41.y(), localVec41.z(), -paramLine.getOrigin().dot3(localVec41));
-    if (!paramRectTile.getExtent().intersects(localPlane2))
-      return null;
-    ArrayList localArrayList = new ArrayList();
-    int[] arrayOfInt = new int[RectTile.access$1500(paramRectTile).indices.limit()];
-    double[] arrayOfDouble = new double[RectTile.access$1500(paramRectTile).vertices.limit()];
-    RectTile.access$1500(paramRectTile).indices.rewind();
-    RectTile.access$1500(paramRectTile).vertices.rewind();
-    RectTile.access$1500(paramRectTile).indices.get(arrayOfInt, 0, arrayOfInt.length);
-    RectTile.access$1500(paramRectTile).vertices.get(arrayOfDouble, 0, arrayOfDouble.length);
-    RectTile.access$1500(paramRectTile).indices.rewind();
-    RectTile.access$1500(paramRectTile).vertices.rewind();
-    int i = RectTile.access$1500(paramRectTile).indices.capacity() - 2;
-    double d1 = RectTile.access$1500(paramRectTile).referenceCenter.x;
-    double d2 = RectTile.access$1500(paramRectTile).referenceCenter.y;
-    double d3 = RectTile.access$1500(paramRectTile).referenceCenter.z;
-    double d4 = paramRectTile.getSector().getDeltaLatRadians() * this.globe.getRadius() / this.density;
-    double d5 = Math.sqrt(d4 * d4 * 2.0D) / 2.0D;
-    double d6 = ((Cylinder)paramRectTile.getExtent()).getCylinderHeight();
-    int j = (this.density + 2) * 2 + 6;
-    int k = i - j;
-    int m = -1;
-    for (int n = j; n < k; n += 2)
-    {
-      m = m == this.density - 1 ? -4 : m + 1;
-      if (m < 0)
-        continue;
-      int i1 = 3 * arrayOfInt[(n + 1)];
-      Vec4 localVec43 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      i1 = 3 * arrayOfInt[(n + 2)];
-      Vec4 localVec44 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      Vec4 localVec45 = Vec4.mix3(0.5D, localVec43, localVec44);
-      if ((Math.abs(localPlane1.distanceTo(localVec45)) > d5) || (Math.abs(localPlane2.distanceTo(localVec45)) > d6))
-        continue;
-      i1 = 3 * arrayOfInt[n];
-      Vec4 localVec47 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      i1 = 3 * arrayOfInt[(n + 3)];
-      Vec4 localVec48 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      Triangle localTriangle = new Triangle(localVec47, localVec43, localVec44);
-      Vec4 localVec46;
-      if ((localVec46 = localTriangle.intersect(paramLine)) != null)
-        localArrayList.add(new Intersection(localVec46, false));
-      localTriangle = new Triangle(localVec43, localVec44, localVec48);
-      if ((localVec46 = localTriangle.intersect(paramLine)) == null)
-        continue;
-      localArrayList.add(new Intersection(localVec46, false));
-    }
-    n = localArrayList.size();
-    if (n == 0)
-      return null;
-    Intersection[] arrayOfIntersection = new Intersection[n];
-    localArrayList.toArray(arrayOfIntersection);
-    Vec4 localVec42 = paramLine.getOrigin();
-    Arrays.sort(arrayOfIntersection, new Comparator(localVec42)
-    {
-      public int compare(Intersection paramIntersection1, Intersection paramIntersection2)
-      {
-        if ((paramIntersection1 == null) && (paramIntersection2 == null))
-          return 0;
-        if (paramIntersection2 == null)
-          return -1;
-        if (paramIntersection1 == null)
-          return 1;
-        Vec4 localVec41 = paramIntersection1.getIntersectionPoint();
-        Vec4 localVec42 = paramIntersection2.getIntersectionPoint();
-        double d1 = this.val$origin.distanceTo3(localVec41);
-        double d2 = this.val$origin.distanceTo3(localVec42);
-        return Double.compare(d1, d2);
-      }
-    });
-    return (Intersection)arrayOfIntersection;
-  }
+
 
   private Intersection[] intersect(RectTile paramRectTile, double paramDouble)
   {
-    if (RectTile.access$1500(paramRectTile).vertices == null)
+    if (paramRectTile.ri.vertices == null)
       return null;
     Cylinder localCylinder = (Cylinder)paramRectTile.getExtent();
     if (!(this.globe.isPointAboveElevation(localCylinder.getBottomCenter(), paramDouble) ^ this.globe.isPointAboveElevation(localCylinder.getTopCenter(), paramDouble)))
       return null;
     ArrayList localArrayList = new ArrayList();
-    int[] arrayOfInt = new int[RectTile.access$1500(paramRectTile).indices.limit()];
-    double[] arrayOfDouble = new double[RectTile.access$1500(paramRectTile).vertices.limit()];
-    RectTile.access$1500(paramRectTile).indices.rewind();
-    RectTile.access$1500(paramRectTile).vertices.rewind();
-    RectTile.access$1500(paramRectTile).indices.get(arrayOfInt, 0, arrayOfInt.length);
-    RectTile.access$1500(paramRectTile).vertices.get(arrayOfDouble, 0, arrayOfDouble.length);
-    RectTile.access$1500(paramRectTile).indices.rewind();
-    RectTile.access$1500(paramRectTile).vertices.rewind();
-    int i = RectTile.access$1500(paramRectTile).indices.capacity() - 2;
-    double d1 = RectTile.access$1500(paramRectTile).referenceCenter.x;
-    double d2 = RectTile.access$1500(paramRectTile).referenceCenter.y;
-    double d3 = RectTile.access$1500(paramRectTile).referenceCenter.z;
+    int[] arrayOfInt = new int[paramRectTile.ri.indices.limit()];
+    double[] arrayOfDouble = new double[paramRectTile.ri.vertices.limit()];
+    paramRectTile.ri.indices.rewind();
+    paramRectTile.ri.vertices.rewind();
+    paramRectTile.ri.indices.get(arrayOfInt, 0, arrayOfInt.length);
+    paramRectTile.ri.vertices.get(arrayOfDouble, 0, arrayOfDouble.length);
+    paramRectTile.ri.indices.rewind();
+    paramRectTile.ri.vertices.rewind();
+    int i = paramRectTile.ri.indices.capacity() - 2;
+    double d1 = paramRectTile.ri.referenceCenter.x;
+    double d2 = paramRectTile.ri.referenceCenter.y;
+    double d3 = paramRectTile.ri.referenceCenter.z;
     int j = (this.density + 2) * 2 + 6;
     int k = i - j;
     int m = -1;
@@ -845,10 +911,10 @@ public class RectangularNormalTessellator extends WWObjectImpl
     double d8 = (d1 - d3) / (d4 - d3);
     int i = (int)(d8 * paramRectTile.density);
     int j = (int)(d7 * paramRectTile.density);
-    double d9 = createPosition(j, d7, RectTile.access$1500(paramRectTile).density);
-    double d10 = createPosition(i, d8, RectTile.access$1500(paramRectTile).density);
+    double d9 = createPosition(j, d7, paramRectTile.ri.density);
+    double d10 = createPosition(i, d8, paramRectTile.ri.density);
     Vec4 localVec4 = interpolate(i, j, d9, d10, paramRectTile.ri);
-    localVec4 = localVec4.add3(RectTile.access$1500(paramRectTile).referenceCenter);
+    localVec4 = localVec4.add3(paramRectTile.ri.referenceCenter);
     return localVec4;
   }
 
@@ -1217,26 +1283,26 @@ public class RectangularNormalTessellator extends WWObjectImpl
 
   private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile paramRectTile, Plane[] paramArrayOfPlane)
   {
-    RectTile.access$1500(paramRectTile).vertices.rewind();
-    RectTile.access$1500(paramRectTile).indices.rewind();
-    Vec4 localVec4 = RectTile.access$1500(paramRectTile).referenceCenter;
+    paramRectTile.ri.vertices.rewind();
+    paramRectTile.ri.indices.rewind();
+    Vec4 localVec4 = paramRectTile.ri.referenceCenter;
     if (localVec4 == null)
       localVec4 = new Vec4(0.0D);
-    int i = RectTile.access$1500(paramRectTile).indices.capacity() - 2;
+    int i = paramRectTile.ri.indices.capacity() - 2;
     int[] arrayOfInt = new int[3];
     double[] arrayOfDouble = new double[3];
     SectorGeometry.ExtractedShapeDescription localExtractedShapeDescription = null;
     for (int j = 0; j < i; j++)
     {
-      RectTile.access$1500(paramRectTile).indices.position(j);
-      RectTile.access$1500(paramRectTile).indices.get(arrayOfInt);
+      paramRectTile.ri.indices.position(j);
+      paramRectTile.ri.indices.get(arrayOfInt);
       if ((arrayOfInt[0] == arrayOfInt[1]) || (arrayOfInt[0] == arrayOfInt[2]) || (arrayOfInt[1] == arrayOfInt[2]))
         continue;
       Vec4[] arrayOfVec4 = new Vec4[3];
       for (int k = 0; k < 3; k++)
       {
-        RectTile.access$1500(paramRectTile).vertices.position(3 * arrayOfInt[k]);
-        RectTile.access$1500(paramRectTile).vertices.get(arrayOfDouble);
+        paramRectTile.ri.vertices.position(3 * arrayOfInt[k]);
+        paramRectTile.ri.vertices.get(arrayOfDouble);
         arrayOfVec4[k] = new Vec4(arrayOfDouble[0] + localVec4.getX(), arrayOfDouble[1] + localVec4.getY(), arrayOfDouble[2] + localVec4.getZ(), 1.0D);
       }
       localExtractedShapeDescription = addClippedPolygon(arrayOfVec4, paramArrayOfPlane, localExtractedShapeDescription);
@@ -1329,26 +1395,26 @@ public class RectangularNormalTessellator extends WWObjectImpl
 
   private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile paramRectTile, Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, double paramDouble1, double paramDouble2)
   {
-    RectTile.access$1500(paramRectTile).vertices.rewind();
-    RectTile.access$1500(paramRectTile).indices.rewind();
-    Vec4 localVec4 = RectTile.access$1500(paramRectTile).referenceCenter;
+    paramRectTile.ri.vertices.rewind();
+    paramRectTile.ri.indices.rewind();
+    Vec4 localVec4 = paramRectTile.ri.referenceCenter;
     if (localVec4 == null)
       localVec4 = new Vec4(0.0D);
-    int i = RectTile.access$1500(paramRectTile).indices.capacity() - 2;
+    int i = paramRectTile.ri.indices.capacity() - 2;
     int[] arrayOfInt = new int[3];
     double[] arrayOfDouble = new double[3];
     SectorGeometry.ExtractedShapeDescription localExtractedShapeDescription = null;
     for (int j = 0; j < i; j++)
     {
-      RectTile.access$1500(paramRectTile).indices.position(j);
-      RectTile.access$1500(paramRectTile).indices.get(arrayOfInt);
+      paramRectTile.ri.indices.position(j);
+      paramRectTile.ri.indices.get(arrayOfInt);
       if ((arrayOfInt[0] == arrayOfInt[1]) || (arrayOfInt[0] == arrayOfInt[2]) || (arrayOfInt[1] == arrayOfInt[2]))
         continue;
       Vec4[] arrayOfVec4 = new Vec4[3];
       for (int k = 0; k < 3; k++)
       {
-        RectTile.access$1500(paramRectTile).vertices.position(3 * arrayOfInt[k]);
-        RectTile.access$1500(paramRectTile).vertices.get(arrayOfDouble);
+        paramRectTile.ri.vertices.position(3 * arrayOfInt[k]);
+        paramRectTile.ri.vertices.get(arrayOfDouble);
         arrayOfVec4[k] = new Vec4(arrayOfDouble[0] + localVec4.getX(), arrayOfDouble[1] + localVec4.getY(), arrayOfDouble[2] + localVec4.getZ(), 1.0D);
       }
       localExtractedShapeDescription = addClippedPolygon(arrayOfVec4, paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2, localExtractedShapeDescription);
@@ -1364,7 +1430,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
     int j = 0;
     int k = -1;
     int m = -1;
-    for (Object localObject2 : paramArrayOfVec4)
+    for (Vec4 localObject2 : paramArrayOfVec4)
     {
       Vec4 localVec42 = localObject2.subtract3(paramVec41);
       double d1 = localVec42.dot3(paramVec42);
@@ -1517,7 +1583,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
 
   public static class RectTile
     implements SectorGeometry
-  {
+  {/*
 
         private static void access$1502(RectTile paramRectTile, RenderInfo renderInfo) {
             throw new UnsupportedOperationException("Not yet implemented");
@@ -1529,7 +1595,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
 
         private static void access$2602(RectTile paramRectTile, int rGB) {
             throw new UnsupportedOperationException("Not yet implemented");
-        }
+        }*/
     private final RectangularNormalTessellator tessellator;
     private final int level;
     private final Sector sector;
