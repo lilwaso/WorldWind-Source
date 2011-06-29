@@ -218,7 +218,7 @@ public class BasicView extends WWObjectImpl implements View
         return this.nearClipDistance;
     }
 
-    protected void setNearClipDistance(double clipDistance)
+    public void setNearClipDistance(double clipDistance)
     {
         this.nearClipDistance = clipDistance;
     }
@@ -228,7 +228,7 @@ public class BasicView extends WWObjectImpl implements View
         return this.farClipDistance;
     }
 
-    protected void setFarClipDistance(double clipDistance)
+    public void setFarClipDistance(double clipDistance)
     {
         this.farClipDistance = clipDistance;
     }
