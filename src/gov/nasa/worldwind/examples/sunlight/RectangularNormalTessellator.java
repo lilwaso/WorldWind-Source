@@ -264,20 +264,23 @@ public class RectangularNormalTessellator extends WWObjectImpl
     return new CacheKey(paramDrawContext, paramRectTile.sector, paramRectTile.density);
   }
 
-  private void makeVerts(DrawContext paramDrawContext, RectTile paramRectTile)
-  {
-    MemoryCache localMemoryCache = WorldWind.getMemoryCache(CACHE_ID);
-    CacheKey localCacheKey = createCacheKey(paramDrawContext, paramRectTile);
-    RectTile.access$1502(paramRectTile, (RenderInfo)localMemoryCache.getObject(localCacheKey));
-    if ((paramRectTile.ri != null) && (RectTile.access$1500(paramRectTile).time >= System.currentTimeMillis() - 1000L))
-      return;
-    RectTile.access$1502(paramRectTile, buildVerts(paramDrawContext, paramRectTile, this.makeTileSkirts));
-    if (paramRectTile.ri != null)
+private void makeVerts(DrawContext dc, RectTile tile)
     {
-      localCacheKey = createCacheKey(paramDrawContext, paramRectTile);
-      localMemoryCache.add(localCacheKey, paramRectTile.ri, paramRectTile.ri.getSizeInBytes());
+        // First see if the vertices have been previously computed and are in the cache. Since the elevation model
+        // can change between frames, regenerate and re-cache vertices every second.
+        MemoryCache cache = WorldWind.getMemoryCache(CACHE_ID);
+        CacheKey cacheKey = this.createCacheKey(dc, tile);
+        tile.ri = (RenderInfo) cache.getObject(cacheKey);
+        if (tile.ri != null && tile.ri.time >= System.currentTimeMillis() - 1000) // Regenerate cache after one second
+            return;
+
+        tile.ri = this.buildVerts(dc, tile, this.makeTileSkirts);
+        if (tile.ri != null)
+        {
+            cacheKey = this.createCacheKey(dc, tile);
+            cache.add(cacheKey, tile.ri, tile.ri.getSizeInBytes());
+        }
     }
-  }
 
   public RenderInfo buildVerts(DrawContext paramDrawContext, RectTile paramRectTile, boolean paramBoolean)
   {
@@ -440,13 +443,13 @@ public class RectangularNormalTessellator extends WWObjectImpl
       Logging.logger().severe((String)localObject1);
       throw new IllegalStateException((String)localObject1);
     }
-    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, RectTile.access$1500(paramRectTile).referenceCenter);
+    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, paramRectTile.ri.referenceCenter);
     if ((!paramDrawContext.isPickingMode()) && (this.lightDirection != null))
       beginLighting(paramDrawContext);
     Object localObject1 = paramDrawContext.getGL();
     ((GL)localObject1).glPushClientAttrib(2);
     ((GL)localObject1).glEnableClientState(32884);
-    ((GL)localObject1).glVertexPointer(3, 5130, 0, RectTile.access$1500(paramRectTile).vertices.rewind());
+    ((GL)localObject1).glVertexPointer(3, 5130, 0, paramRectTile.ri.vertices.rewind());
     ((GL)localObject1).glEnableClientState(32885);
     ((GL)localObject1).glNormalPointer(5130, 0, RectTile.access$1500(paramRectTile).normals.rewind());
     for (int i = 0; i < paramInt; i++)
@@ -465,7 +468,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
     if ((!paramDrawContext.isPickingMode()) && (this.lightDirection != null))
       endLighting(paramDrawContext);
     paramDrawContext.getView().popReferenceCenter(paramDrawContext);
-    return RectTile.access$1500(paramRectTile).indices.limit() - 2;
+    return paramRectTile.ri.indices.limit() - 2;
   }
 
   private void beginLighting(DrawContext paramDrawContext)
@@ -694,7 +697,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
     int i = RectTile.access$1500(paramRectTile).indices.capacity() - 2;
     double d1 = RectTile.access$1500(paramRectTile).referenceCenter.x;
     double d2 = RectTile.access$1500(paramRectTile).referenceCenter.y;
-    double d3 = RectTile.access$1500(paramRectTile).referenceCenter.z;
+    double d3 = RectTile.access$1500(paramRectTile).referenceCenter.z;*/
     double d4 = paramRectTile.getSector().getDeltaLatRadians() * this.globe.getRadius() / this.density;
     double d5 = Math.sqrt(d4 * d4 * 2.0D) / 2.0D;
     double d6 = ((Cylinder)paramRectTile.getExtent()).getCylinderHeight();
@@ -726,7 +729,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
         continue;
       localArrayList.add(new Intersection(localVec46, false));
     }
-    n = localArrayList.size();
+    int n = localArrayList.size();
     if (n == 0)
       return null;
     Intersection[] arrayOfIntersection = new Intersection[n];
@@ -1364,7 +1367,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
     int j = 0;
     int k = -1;
     int m = -1;
-    for (Object localObject2 : paramArrayOfVec4)
+    for (Vec4 localObject2 : paramArrayOfVec4)
     {
       Vec4 localVec42 = localObject2.subtract3(paramVec41);
       double d1 = localVec42.dot3(paramVec42);
@@ -1518,7 +1521,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
   public static class RectTile
     implements SectorGeometry
   {
-
+/*
         private static void access$1502(RectTile paramRectTile, RenderInfo renderInfo) {
             throw new UnsupportedOperationException("Not yet implemented");
         }
@@ -1529,7 +1532,7 @@ public class RectangularNormalTessellator extends WWObjectImpl
 
         private static void access$2602(RectTile paramRectTile, int rGB) {
             throw new UnsupportedOperationException("Not yet implemented");
-        }
+        }*/
     private final RectangularNormalTessellator tessellator;
     private final int level;
     private final Sector sector;

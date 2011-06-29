@@ -10,6 +10,7 @@ All Rights Reserved.
 package gov.nasa.worldwind.view.orbit;
 
 import gov.nasa.worldwind.View;
+import gov.nasa.worldwind.view.OrbitViewModel;
 import gov.nasa.worldwind.geom.Position;
 
 /**
@@ -112,4 +113,6 @@ public interface OrbitView extends View
     void stopMovementOnCenter();
 
     public static final String CENTER_STOPPED = "gov.nasa.worldwind.view.orbit.OrbitView.CenterStopped";
+    
+    public abstract OrbitViewModel getOrbitViewModel();
 }
