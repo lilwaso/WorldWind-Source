@@ -449,4 +449,8 @@ public interface View extends WWObject, Restorable
    void stopStateIterators();
    
    void applyStateIterator(ViewStateIterator vsi);
+   
+   public abstract void setFarClipDistance(double paramDouble);
+   
+   public abstract void setNearClipDistance(double paramDouble);
  }
