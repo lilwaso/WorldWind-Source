@@ -48,21 +48,190 @@ public class EllipsoidalGlobe extends WWObjectImpl implements Globe
         this.tessellator = (Tessellator) WorldWind.createConfigurationComponent(AVKey.TESSELLATOR_CLASS_NAME);
     }
 
-    public Matrix computeTransformToPosition(Angle paramAngle1, Angle paramAngle2, double paramDouble) {
-        throw new UnsupportedOperationException("Not supported yet.");
+   public Matrix computeTransformToPosition(Angle paramAngle1, Angle paramAngle2, double paramDouble)
+  {
+    if ((paramAngle1 == null) || (paramAngle2 == null))
+    {
+      String localObject = Logging.getMessage("nullValue.LatitudeOrLongitudeIsNull");
+      Logging.logger().severe((String)localObject);
+      throw new IllegalArgumentException((String)localObject);
     }
+    Object localObject = geodeticToCartesian(paramAngle1, paramAngle2, paramDouble);
+    Matrix localMatrix = Matrix.fromTranslation((Vec4)localObject);
+    localMatrix = localMatrix.multiply(Matrix.fromRotationY(paramAngle2));
+    localMatrix = localMatrix.multiply(Matrix.fromRotationX(paramAngle1.multiply(-1.0D)));
+    return (Matrix)localMatrix;
+  }
 
-    public Matrix computeTransformToPosition(Position paramPosition) {
-        throw new UnsupportedOperationException("Not supported yet.");
+  public Matrix computeTransformToPosition(Position paramPosition)
+  {
+    if (paramPosition == null)
+    {
+      String str = Logging.getMessage("nullValue.PositionIsNull");
+      Logging.logger().severe(str);
+      throw new IllegalArgumentException(str);
     }
+    return computeTransformToPosition(paramPosition.getLatitude(), paramPosition.getLongitude(), paramPosition.getElevation());
+  }
 
-    public Cylinder computeBoundingCylinder(double paramDouble, Sector paramSector) {
-        throw new UnsupportedOperationException("Not supported yet.");
-    }
 
-    public Cylinder computeBoundingCylinder(double paramDouble1, Sector paramSector, double paramDouble2, double paramDouble3) {
-        throw new UnsupportedOperationException("Not supported yet.");
+    public Cylinder computeBoundingCylinder(double paramDouble, Sector paramSector)
+  {
+    if (paramSector == null)
+    {
+      String localObject = Logging.getMessage("nullValue.SectorIsNull");
+      Logging.logger().severe((String)localObject);
+      throw new IllegalArgumentException((String)localObject);
     }
+    double localObject[] = getMinAndMaxElevations(paramSector);
+    return (Cylinder)computeBoundingCylinder(paramDouble, paramSector, localObject[0], localObject[1]);
+  }
+
+  public Cylinder computeBoundingCylinder(double paramDouble1, Sector paramSector, double paramDouble2, double paramDouble3)
+  {
+    if (paramSector == null)
+    {
+      String str = Logging.getMessage("nullValue.SectorIsNull");
+      Logging.logger().severe(str);
+      throw new IllegalArgumentException(str);
+    }
+    double d1 = paramDouble2 * paramDouble1;
+    double d2 = paramDouble3 * paramDouble1;
+    if ((paramSector.getDeltaLatDegrees() >= 180.0D) || (paramSector.getDeltaLonDegrees() >= 180.0D))
+      return computeBoundsFromSectorLatitudeRange(paramSector, d1, d2);
+    return computeBoundsFromSectorQuadrilateral(paramSector, d1, d2);
+  }
+ protected Cylinder computeBoundsFromSectorQuadrilateral(Sector paramSector, double paramDouble1, double paramDouble2)
+  {
+    Object localObject;
+    if (paramSector == null)
+    {
+      localObject = Logging.getMessage("nullValue.SectorIsNull");
+      Logging.logger().severe((String)localObject);
+      throw new IllegalArgumentException((String)localObject);
+    }
+    Vec4 localVec41;
+    Vec4 localVec42;
+    if (Math.abs(paramSector.getMinLatitude().degrees) <= Math.abs(paramSector.getMaxLatitude().degrees))
+    {
+      localObject = computePointFromPosition(paramSector.getMinLatitude(), paramSector.getMaxLongitude(), paramDouble2);
+      localVec41 = computePointFromPosition(paramSector.getMinLatitude(), paramSector.getMinLongitude(), paramDouble2);
+      localVec42 = computePointFromPosition(paramSector.getMaxLatitude(), paramSector.getMinLongitude(), paramDouble2);
+    }
+    else
+    {
+      localObject = computePointFromPosition(paramSector.getMaxLatitude(), paramSector.getMinLongitude(), paramDouble2);
+      localVec41 = computePointFromPosition(paramSector.getMaxLatitude(), paramSector.getMaxLongitude(), paramDouble2);
+      localVec42 = computePointFromPosition(paramSector.getMinLatitude(), paramSector.getMinLongitude(), paramDouble2);
+    }
+    Vec4[] arrayOfVec41 = new Vec4[1];
+    Vec4[] arrayOfVec42 = new Vec4[1];
+    double[] arrayOfDouble = new double[1];
+    if (!computeCircleThroughPoints((Vec4)localObject, localVec41, localVec42, arrayOfVec41, arrayOfVec42, arrayOfDouble))
+      return computeBoundsFromSectorVertices(paramSector, paramDouble1, paramDouble2);
+    Vec4 localVec43 = arrayOfVec41[0];
+    Vec4 localVec44 = arrayOfVec42[0];
+    double d1 = arrayOfDouble[0];
+    Vec4 localVec45 = computePointFromPosition(paramSector.getMinLatitude(), paramSector.getMinLongitude(), paramDouble1);
+    double d2 = localVec45.subtract3(localVec43).dot3(localVec44);
+    localVec45 = computePointFromPosition(paramSector.getMaxLatitude(), paramSector.getMaxLongitude(), paramDouble1);
+    d2 = Math.min(d2, localVec45.subtract3(localVec43).dot3(localVec44));
+    LatLon localLatLon = paramSector.getCentroid();
+    localVec45 = computePointFromPosition(localLatLon.getLatitude(), localLatLon.getLongitude(), paramDouble2);
+    double d3 = localVec45.subtract3(localVec43).dot3(localVec44);
+    Vec4 localVec46 = localVec44.multiply3(d2).add3(localVec43);
+    Vec4 localVec47 = localVec44.multiply3(d3).add3(localVec43);
+    return (Cylinder)new Cylinder(localVec46, localVec47, d1);
+  }
+ protected Cylinder computeBoundsFromSectorVertices(Sector paramSector, double paramDouble1, double paramDouble2)
+  {
+    if (paramSector == null)
+    {
+      String localObject = Logging.getMessage("nullValue.SectorIsNull");
+      Logging.logger().severe((String)localObject);
+      throw new IllegalArgumentException((String)localObject);
+    }
+    Object localObject = paramSector.getCentroid();
+    Vec4 localVec41 = computePointFromPosition(((LatLon)localObject).getLatitude(), ((LatLon)localObject).getLongitude(), paramDouble2);
+    Vec4 localVec42 = computeSurfaceNormalAtPoint(localVec41);
+    Vec4 localVec43 = computePointFromPosition(paramSector.getMinLatitude(), paramSector.getMinLongitude(), paramDouble1);
+    Vec4 localVec44 = computePointFromPosition(paramSector.getMinLatitude(), paramSector.getMaxLongitude(), paramDouble1);
+    Vec4 localVec45 = computePointFromPosition(paramSector.getMaxLatitude(), paramSector.getMaxLongitude(), paramDouble1);
+    Vec4 localVec46 = computePointFromPosition(paramSector.getMaxLatitude(), paramSector.getMinLongitude(), paramDouble1);
+    double d1 = localVec43.subtract3(localVec41).dot3(localVec42);
+    d1 = Math.min(d1, localVec44.subtract3(localVec41).dot3(localVec42));
+    d1 = Math.min(d1, localVec45.subtract3(localVec41).dot3(localVec42));
+    d1 = Math.min(d1, localVec46.subtract3(localVec41).dot3(localVec42));
+    Vec4 localVec47 = localVec42.multiply3(d1).add3(localVec41);
+    double d2 = localVec41.distanceTo3(localVec43);
+    d2 = Math.max(d2, localVec41.distanceTo3(localVec44));
+    d2 = Math.max(d2, localVec41.distanceTo3(localVec45));
+    d2 = Math.max(d2, localVec41.distanceTo3(localVec46));
+    return (Cylinder)new Cylinder(localVec47, localVec41, d2);
+  }
+
+  private boolean computeCircleThroughPoints(Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, Vec4[] paramArrayOfVec41, Vec4[] paramArrayOfVec42, double[] paramArrayOfDouble)
+  {
+    if ((paramVec41 == null) || (paramVec42 == null) || (paramVec43 == null))
+    {
+      String localObject = Logging.getMessage("nullValue.Vec4IsNull");
+      Logging.logger().severe((String)localObject);
+      throw new IllegalArgumentException((String)localObject);
+    }
+    Object localObject = paramVec42.subtract3(paramVec41);
+    Vec4 localVec41 = paramVec43.subtract3(paramVec42);
+    Vec4 localVec42 = paramVec43.subtract3(paramVec41);
+    double d1 = ((Vec4)localObject).dot3(localVec42);
+    double d2 = -((Vec4)localObject).dot3(localVec41);
+    double d3 = localVec41.dot3(localVec42);
+    double d4 = d2 + d3;
+    double d5 = d1 + d3;
+    double d6 = d1 + d2;
+    double d7 = d1 * d4;
+    double d8 = d2 * d5;
+    double d9 = d3 * d6;
+    double d10 = Math.max(Math.max(d7, d8), d9);
+    double d11 = Math.min(Math.min(d7, d8), d9);
+    double d12 = d7 + d8 + d9;
+    double d13 = 1.0E-006D;
+    if (Math.abs(d12) <= d13 * (d10 - d11))
+      return false;
+    double d14 = 0.5D * d4 * d5 * d6 / d12;
+    if (d14 < 0.0D)
+      return false;
+    double d15 = Math.sqrt(d14);
+    Vec4 localVec43 = paramVec41.multiply3(d7 / d12);
+    localVec43 = localVec43.add3(paramVec42.multiply3(d8 / d12));
+    localVec43 = localVec43.add3(paramVec43.multiply3(d9 / d12));
+    Vec4 localVec44 = localVec42.cross3((Vec4)localObject);
+    localVec44 = localVec44.normalize3();
+    if (paramArrayOfVec41 != null)
+      paramArrayOfVec41[0] = localVec43;
+    if (paramArrayOfVec42 != null)
+      paramArrayOfVec42[0] = localVec44;
+    if (paramArrayOfDouble != null)
+      paramArrayOfDouble[0] = d15;
+    return true;
+  }
+  protected Cylinder computeBoundsFromSectorLatitudeRange(Sector paramSector, double paramDouble1, double paramDouble2)
+  {
+    if (paramSector == null)
+    {
+      String localObject = Logging.getMessage("nullValue.SectorIsNull");
+      Logging.logger().severe((String)localObject);
+      throw new IllegalArgumentException((String)localObject);
+    }
+    Object localObject = Vec4.ZERO;
+    Vec4 localVec41 = Vec4.UNIT_Y;
+    double d1 = getEquatorialRadius() + paramDouble2;
+    Vec4 localVec42 = computePointFromPosition(paramSector.getMinLatitude(), paramSector.getMinLongitude(), paramDouble2);
+    double d2 = localVec42.subtract3((Vec4)localObject).dot3(localVec41);
+    localVec42 = computePointFromPosition(paramSector.getMaxLatitude(), paramSector.getMaxLongitude(), paramDouble2);
+    double d3 = localVec42.subtract3((Vec4)localObject).dot3(localVec41);
+    Vec4 localVec43 = localVec41.multiply3(d2).add3((Vec4)localObject);
+    Vec4 localVec44 = localVec41.multiply3(d3).add3((Vec4)localObject);
+    return (Cylinder)new Cylinder(localVec43, localVec44, d1);
+  }
 
     protected class StateKey implements GlobeStateKey
     {

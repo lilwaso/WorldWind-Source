@@ -17,7 +17,6 @@ import gov.nasa.worldwind.globes.Globe;
 import gov.nasa.worldwind.pick.*;
 import gov.nasa.worldwind.render.*;
 import gov.nasa.worldwind.util.*;
-
 import javax.media.opengl.GL;
 import java.awt.*;
 import java.nio.*;
