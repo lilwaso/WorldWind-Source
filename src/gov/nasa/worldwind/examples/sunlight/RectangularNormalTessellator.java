@@ -47,6 +47,10 @@ import java.util.List;
 import java.util.logging.Logger;
 import javax.media.opengl.GL;
 import java.lang.Object;
+import gov.nasa.worldwind.cache.GpuResourceCache;
+import com.sun.opengl.util.j2d.TextRenderer;
+import gov.nasa.worldwind.util.OGLTextRenderer;
+import gov.nasa.worldwind.util.OGLStackHandler;
 
 public class RectangularNormalTessellator extends WWObjectImpl
   implements Tessellator
@@ -74,7 +78,9 @@ public class RectangularNormalTessellator extends WWObjectImpl
   private Material material = new Material(Color.WHITE);
   private Color lightColor = Color.WHITE;
   private Color ambientColor = new Color(0.1F, 0.1F, 0.1F);
-
+  protected static final HashMap<Integer, Object> textureCoordVboCacheKeys = new HashMap<Integer, Object>();
+  protected static final HashMap<Integer, Object> indexListsVboCacheKeys = new HashMap<Integer, Object>();
+  
   public SectorGeometryList tessellate(DrawContext paramDrawContext)
   {
     String str;
@@ -1581,8 +1587,7 @@ private Intersection[] intersect(RectTile tile, Line line)
     }
   }
 
-  public static class RectTile
-    implements SectorGeometry
+  public static class RectTile implements SectorGeometry
   {/*
 
 private static void access$1502(RectTile paramRectTile, RenderInfo renderInfo) {
@@ -1690,35 +1695,62 @@ throw new UnsupportedOperationException("Not yet implemented");
     {
       return this.tessellator.getIntersectingTessellationPieces(this, paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2);
     }
-
-        @Override
-        public void beginRendering(DrawContext dc, int numTextureUnits) {
-            throw new UnsupportedOperationException("Not supported yet.");
-        }
-
-        @Override
-        public void endRendering(DrawContext dc) {
-            throw new UnsupportedOperationException("Not supported yet.");
-        }
-
-        @Override
-        public void renderTileID(DrawContext dc) {
-            throw new UnsupportedOperationException("Not supported yet.");
-        }
-
-        @Override
-        public void renderMultiTexture(DrawContext dc, int numTextureUnits, boolean beginRenderingCalled) {
-            throw new UnsupportedOperationException("Not supported yet.");
-        }
-
-        @Override
-        public void render(DrawContext dc, boolean beginRenderingCalled) {
-            throw new UnsupportedOperationException("Not supported yet.");
-        }
     public int getLevel()
     {
         return this.level;
     }
+
+        @Override
+        public void beginRendering(DrawContext dc, int numTextureUnits) {
+            dc.getView().setReferenceCenter(dc, ri.referenceCenter);
+            if (dc.getGLRuntimeCapabilities().isUseVertexBufferObject())
+            {
+                if (this.tessellator.bindVbos(dc, this, numTextureUnits))
+                    this.ri.isVboBound = true;
+            }
+        }
+
+        @Override
+        public void endRendering(DrawContext dc) {
+            if (this.ri.isVboBound)
+            {
+                dc.getGL().glBindBuffer(GL.GL_ARRAY_BUFFER, 0);
+                this.ri.isVboBound = false;
+            }        
+        }
+
+        @Override
+        public void renderTileID(DrawContext dc) {
+            this.tessellator.renderTileID(dc, this);
+        }
+
+        @Override
+        public void renderMultiTexture(DrawContext dc, int numTextureUnits, boolean beginRenderingCalled) {
+            if (beginRenderingCalled)
+            {
+                this.tessellator.renderMultiTexture(dc, this, numTextureUnits);
+            }
+            else
+            {
+                this.beginRendering(dc, numTextureUnits);
+                this.tessellator.renderMultiTexture(dc, this, numTextureUnits);
+                this.endRendering(dc);
+            }
+        }
+
+        @Override
+        public void render(DrawContext dc, boolean beginRenderingCalled) {
+            if (beginRenderingCalled)
+            {
+                this.tessellator.render(dc, this);
+            }
+            else
+            {
+                this.beginRendering(dc, 1);
+                this.tessellator.render(dc, this);
+                this.endRendering(dc);
+            }
+        }
   }
 
   protected static class RenderInfo
@@ -1730,6 +1762,8 @@ throw new UnsupportedOperationException("Not yet implemented");
     private final DoubleBuffer texCoords;
     private final IntBuffer indices;
     private final long time;
+    protected boolean isVboBound = false;
+    protected Object vboCacheKey = new Object();
 
     private RenderInfo(int paramInt, DoubleBuffer paramDoubleBuffer1, DoubleBuffer paramDoubleBuffer2, DoubleBuffer paramDoubleBuffer3, Vec4 paramVec4)
     {
@@ -1746,6 +1780,184 @@ throw new UnsupportedOperationException("Not yet implemented");
     {
       return 32 + this.vertices.limit() * 64;
     }
+    protected void fillVerticesVBO(DrawContext dc)
+    {
+        GL gl = dc.getGL();
+
+        int[] vboIds = (int[]) dc.getGpuResourceCache().get(this.vboCacheKey);
+        if (vboIds == null)
+        {
+            vboIds = new int[1];
+            gl.glGenBuffers(vboIds.length, vboIds, 0);
+            int size = this.vertices.limit() * 4;
+            dc.getGpuResourceCache().put(this.vboCacheKey, vboIds, GpuResourceCache.VBO_BUFFERS, size);
+        }
+
+        try
+        {
+            DoubleBuffer vb = this.vertices;
+            gl.glBindBuffer(GL.GL_ARRAY_BUFFER, vboIds[0]);
+            gl.glBufferData(GL.GL_ARRAY_BUFFER, vb.limit() * 4, vb.rewind(), GL.GL_STATIC_DRAW);
+        }
+        finally
+        {
+            gl.glBindBuffer(GL.GL_ARRAY_BUFFER, 0);
+        }
+    }
   }
+      protected boolean bindVbos(DrawContext dc, RectTile tile, int numTextureUnits)
+    {
+        int[] verticesVboId = (int[]) dc.getGpuResourceCache().get(tile.ri.vboCacheKey);
+        if (verticesVboId == null)
+        {
+            tile.ri.fillVerticesVBO(dc);
+            verticesVboId = (int[]) dc.getGpuResourceCache().get(tile.ri.vboCacheKey);
+            if (verticesVboId == null)
+                return false;
+        }
+
+        GL gl = dc.getGL();
+
+        // Bind vertices
+        gl.glBindBuffer(GL.GL_ARRAY_BUFFER, verticesVboId[0]);
+        gl.glVertexPointer(3, GL.GL_FLOAT, 0, 0);
+
+        // Bind texture coordinates
+        if (numTextureUnits > 0)
+        {
+            Object texCoordsVboCacheKey = textureCoordVboCacheKeys.get(tile.density);
+            int[] texCoordsVboId = (int[])
+                (texCoordsVboCacheKey != null ? dc.getGpuResourceCache().get(texCoordsVboCacheKey) : null);
+            if (texCoordsVboId == null)
+                texCoordsVboId = this.fillTextureCoordsVbo(dc, tile.density, tile.ri.texCoords);
+            for (int i = 0; i < numTextureUnits; i++)
+            {
+                gl.glClientActiveTexture(GL.GL_TEXTURE0 + i);
+                gl.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY);
+
+                gl.glBindBuffer(GL.GL_ARRAY_BUFFER, texCoordsVboId[0]);
+                gl.glTexCoordPointer(2, GL.GL_FLOAT, 0, 0);
+            }
+        }
+
+        // Bind index list
+        Object indexListVboCacheKey = indexListsVboCacheKeys.get(tile.density);
+        int[] indexListVboId = (int[])
+            (indexListVboCacheKey != null ? dc.getGpuResourceCache().get(indexListVboCacheKey) : null);
+        if (indexListVboId == null)
+            indexListVboId = this.fillIndexListVbo(dc, tile.density, tile.ri.indices);
+        if (indexListVboId != null)
+            gl.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, indexListVboId[0]);
+
+        return indexListVboId != null;
+    }
+      
+    protected int[] fillIndexListVbo(DrawContext dc, int density, IntBuffer indices)
+    {
+        GL gl = dc.getGL();
+
+        Object indexListVboCacheKey = indexListsVboCacheKeys.get(density);
+        int[] indexListVboId = (int[])
+            (indexListVboCacheKey != null ? dc.getGpuResourceCache().get(indexListVboCacheKey) : null);
+        if (indexListVboId == null)
+        {
+            indexListVboId = new int[1];
+            gl.glGenBuffers(indexListVboId.length, indexListVboId, 0);
+
+            if (indexListVboCacheKey == null)
+            {
+                indexListVboCacheKey = new Object();
+                indexListsVboCacheKeys.put(density, indexListVboCacheKey);
+            }
+
+            int size = indices.limit() * 4;
+            dc.getGpuResourceCache().put(indexListVboCacheKey, indexListVboId, GpuResourceCache.VBO_BUFFERS, size);
+        }
+
+        try
+        {
+            gl.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, indexListVboId[0]);
+            gl.glBufferData(GL.GL_ELEMENT_ARRAY_BUFFER, indices.limit() * 4, indices.rewind(), GL.GL_STATIC_DRAW);
+        }
+        finally
+        {
+            gl.glBindBuffer(GL.GL_ELEMENT_ARRAY_BUFFER, 0);
+        }
+
+        return indexListVboId;
+    }
+      
+    protected int[] fillTextureCoordsVbo(DrawContext dc, int density, DoubleBuffer texCoords)
+    {
+        GL gl = dc.getGL();
+
+        Object texCoordVboCacheKey = textureCoordVboCacheKeys.get(density);
+        int[] texCoordVboId = (int[])
+            (texCoordVboCacheKey != null ? dc.getGpuResourceCache().get(texCoordVboCacheKey) : null);
+        if (texCoordVboId == null)
+        {
+            texCoordVboId = new int[1];
+            gl.glGenBuffers(texCoordVboId.length, texCoordVboId, 0);
+
+            if (texCoordVboCacheKey == null)
+            {
+                texCoordVboCacheKey = new Object();
+                textureCoordVboCacheKeys.put(density, texCoordVboCacheKey);
+            }
+
+            int size = texCoords.limit() * 4;
+            dc.getGpuResourceCache().put(texCoordVboCacheKey, texCoordVboId, GpuResourceCache.VBO_BUFFERS, size);
+        }
+
+        try
+        {
+            gl.glBindBuffer(GL.GL_ARRAY_BUFFER, texCoordVboId[0]);
+            gl.glBufferData(GL.GL_ARRAY_BUFFER, texCoords.limit() * 4, texCoords.rewind(), GL.GL_STATIC_DRAW);
+        }
+        finally
+        {
+            gl.glBindBuffer(GL.GL_ARRAY_BUFFER, 0);
+        }
+
+        return texCoordVboId;
+    }
+
+    protected void renderTileID(DrawContext dc, RectTile tile)
+    {
+        java.awt.Rectangle viewport = dc.getView().getViewport();
+        TextRenderer textRenderer = OGLTextRenderer.getOrCreateTextRenderer(dc.getTextRendererCache(),
+            java.awt.Font.decode("Arial-Plain-15"));
+
+        GL gl = dc.getGL();
+        OGLStackHandler ogsh = new OGLStackHandler();
+
+        try
+        {
+            ogsh.pushAttrib(gl, GL.GL_ENABLE_BIT);
+
+            dc.getGL().glDisable(GL.GL_DEPTH_TEST);
+            dc.getGL().glDisable(GL.GL_BLEND);
+
+            textRenderer.beginRendering(viewport.width, viewport.height);
+            textRenderer.setColor(Color.RED);
+            String tileLabel = Integer.toString(tile.level);
+            double[] elevs = this.globe.getMinAndMaxElevations(tile.getSector());
+            if (elevs != null)
+                tileLabel += ", " + (int) elevs[0] + "/" + (int) elevs[1];
+
+            LatLon ll = tile.getSector().getCentroid();
+            Vec4 pt = dc.getGlobe().computePointFromPosition(ll.getLatitude(), ll.getLongitude(),
+                dc.getGlobe().getElevation(ll.getLatitude(), ll.getLongitude()));
+            pt = dc.getView().project(pt);
+            textRenderer.draw(tileLabel, (int) pt.x, (int) pt.y);
+            textRenderer.setColor(Color.WHITE);
+            textRenderer.endRendering();
+        }
+        finally
+        {
+            ogsh.pop(gl);
+        }
+    }
+
 }
 

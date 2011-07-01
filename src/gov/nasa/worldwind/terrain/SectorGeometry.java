@@ -8,6 +8,7 @@ package gov.nasa.worldwind.terrain;
 
 import gov.nasa.worldwind.geom.*;
 import gov.nasa.worldwind.pick.PickedObject;
+import gov.nasa.worldwind.pick.Pickable;
 import gov.nasa.worldwind.render.*;
 
 import java.awt.*;
@@ -24,21 +25,21 @@ import java.util.ArrayList;
  *
  * @version $Id: SectorGeometry.java 15587 2011-06-09 04:31:14Z tgaskins $
  */
-public interface SectorGeometry extends Renderable
+public abstract interface SectorGeometry extends Renderable, Pickable
 {
     /**
      * Returns this sector geometry's extent.
      *
      * @return this sector geometry's extent, or null if the extent has not been computed.
      */
-    Extent getExtent();
+    public abstract Extent getExtent();
 
     /**
      * Indicates the {@link Sector} covered by this sector geometry.
      *
      * @return this sector geometry's sector.
      */
-    Sector getSector();
+    public abstract Sector getSector();
 
     /**
      * Performs a pick on the geometry. The result, if any, is added to the draw context's picked-object list. See
@@ -52,7 +53,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if either the draw context or list of pick points is null.
      */
-    void pick(DrawContext dc, java.awt.Point pickPoint);
+    public abstract void pick(DrawContext dc, java.awt.Point pickPoint);
 
     /**
      * Computes the Cartesian coordinates of a location on the geometry's surface.
@@ -66,7 +67,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if either the latitude or longitude are null.
      */
-    Vec4 getSurfacePoint(Angle latitude, Angle longitude, double metersOffset);
+    public abstract Vec4 getSurfacePoint(Angle latitude, Angle longitude, double metersOffset);
 
     /**
      * Indicates that this sector geometry is about to be rendered one or more times. When rendering is complete, the
@@ -75,14 +76,14 @@ public interface SectorGeometry extends Renderable
      * @param dc              the current draw context.
      * @param numTextureUnits the number of texture units to use.
      */
-    void beginRendering(DrawContext dc, int numTextureUnits);
+    public abstract void beginRendering(DrawContext dc, int numTextureUnits);
 
     /**
      * Restores state established by {@link #beginRendering(gov.nasa.worldwind.render.DrawContext, int)}.
      *
      * @param dc the current draw context.
      */
-    void endRendering(DrawContext dc);
+    public abstract void endRendering(DrawContext dc);
 
     /**
      * Displays the geometry. The number of texture units to use may be specified, but at most only the number of
@@ -96,7 +97,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if the draw context is null or the number of texture units is less than one.
      */
-    void renderMultiTexture(DrawContext dc, int numTextureUnits);
+    public abstract void renderMultiTexture(DrawContext dc, int numTextureUnits);
 
     /**
      * Displays the geometry's tessellation. Option parameters control whether to display the interior triangles, the
@@ -108,7 +109,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if the draw context is null.
      */
-    void renderWireframe(DrawContext dc, boolean interior, boolean exterior);
+    public abstract void renderWireframe(DrawContext dc, boolean interior, boolean exterior);
 
     /**
      * Displays the geometry's bounding volume.
@@ -117,7 +118,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if the draw context is null.
      */
-    void renderBoundingVolume(DrawContext dc);
+    public abstract void renderBoundingVolume(DrawContext dc);
 
     /**
      * Displays on the geometry's surface the tessellator level and the minimum and maximum elevations of the sector.
@@ -126,7 +127,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if the draw context is null.
      */
-    void renderTileID(DrawContext dc);
+    public abstract void renderTileID(DrawContext dc);
 
     /**
      * Performs a pick on the geometry.
@@ -143,7 +144,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if either the draw context or list of pick points is null.
      */
-    PickedObject[] pick(DrawContext dc, java.util.List<? extends Point> pickPoints);
+    public abstract PickedObject[] pick(DrawContext dc, java.util.List<? extends Point> pickPoints);
 
     /**
      * Computes the Cartesian coordinates of a line's intersections with the geometry.
@@ -155,7 +156,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if the line is null.
      */
-    Intersection[] intersect(Line line);
+    public abstract Intersection[] intersect(Line line);
 
     /**
      * Computes the geometry's intersections with a globe at a specified elevation.
@@ -166,7 +167,7 @@ public interface SectorGeometry extends Renderable
      *         intersections describes a list of individual segments - two <code>Intersection</code> elements for each,
      *         corresponding to each geometry triangle that intersects the given elevation.
      */
-    Intersection[] intersect(double elevation);
+    public abstract Intersection[] intersect(double elevation);
 
     /**
      * Computes texture coordinates for the geometry. Specific coordinate values are computed by a specified computer
@@ -181,7 +182,7 @@ public interface SectorGeometry extends Renderable
      *
      * @throws IllegalArgumentException if the computer is null.
      */
-    DoubleBuffer makeTextureCoordinates(GeographicTextureCoordinateComputer computer);
+    abstract DoubleBuffer makeTextureCoordinates(GeographicTextureCoordinateComputer computer);
 
     /**
      * Displays the geometry. The number of texture units to use may be specified, but at most only the number of
@@ -200,7 +201,7 @@ public interface SectorGeometry extends Renderable
      * @throws IllegalArgumentException if the draw context is null or the number of texture units is less than one.
      * @see #beginRendering(gov.nasa.worldwind.render.DrawContext, int)
      */
-    void renderMultiTexture(DrawContext dc, int numTextureUnits, boolean beginRenderingCalled);
+    public abstract void renderMultiTexture(DrawContext dc, int numTextureUnits, boolean beginRenderingCalled);
 
     /**
      * Displays the geometry.
@@ -217,7 +218,7 @@ public interface SectorGeometry extends Renderable
      * @throws IllegalArgumentException if the draw context is null or the number of texture units is less than one.
      * @see #beginRendering(gov.nasa.worldwind.render.DrawContext, int)
      */
-    void render(DrawContext dc, boolean beginRenderingCalled);
+    public abstract void render(DrawContext dc, boolean beginRenderingCalled);
 
     /** An interface for computing texture coordinates for a given location. */
     public interface GeographicTextureCoordinateComputer
@@ -231,7 +232,7 @@ public interface SectorGeometry extends Renderable
          * @return the [s,t] texture coordinate, where s corresponds to the longitude axis and t corresponds to the
          *         latitude axis.
          */
-        double[] compute(Angle latitude, Angle longitude);
+        public abstract double[] compute(Angle latitude, Angle longitude);
     }
 //
 //    // Extraction of portions of the current tessellation inside given CONVEX regions:
