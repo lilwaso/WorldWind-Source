@@ -68,7 +68,7 @@ public class BasicView extends WWObjectImpl implements View
 
     // TODO: make configurable
     protected static final double MINIMUM_NEAR_DISTANCE = 2;
-    protected static final double MINIMUM_FAR_DISTANCE = 100;
+    protected static final double MINIMUM_FAR_DISTANCE = 100000;
     protected static final double COLLISION_THRESHOLD = 10;
     protected static final int COLLISION_NUM_ITERATIONS = 4;
 
@@ -626,7 +626,7 @@ public class BasicView extends WWObjectImpl implements View
 
     protected double computeFarClipDistance()
     {
-        return computeFarDistance(getCurrentEyePosition());
+        return 10*computeFarDistance(getCurrentEyePosition());
     }
 
     protected double computeNearDistance(Position eyePosition)
