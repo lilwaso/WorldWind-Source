@@ -36,7 +36,7 @@ public class StarsLayer extends RenderableLayer
     protected int numStars;
     protected boolean rebuild;            // True if need to rebuild GL list
     /** The radius of the spherical shell containing the stars. */
-    protected Double radius; // radius is either set explicitly or taken from the star file
+    protected Double radius = 200000000d; // radius is either set explicitly or taken from the star file
     /** The star sphere longitudinal rotation. */
     protected Angle longitudeOffset = Angle.ZERO;
     /** The star sphere latitudinal rotation. */
@@ -377,5 +377,13 @@ public class StarsLayer extends RenderableLayer
     public String toString()
     {
         return Logging.getMessage("layers.Earth.StarsLayer.Name");
+    }
+    public double getRadius()
+    {
+        return this.radius;
+    }
+    public void setRadius(double r)
+    {
+        this.radius = r;
     }
 }
