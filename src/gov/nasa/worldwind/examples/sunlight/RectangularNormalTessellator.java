@@ -54,6 +54,7 @@ import java.nio.FloatBuffer;
 import gov.nasa.worldwind.util.OGLTextRenderer;
 import gov.nasa.worldwind.util.OGLStackHandler;
 import com.sun.opengl.util.j2d.TextRenderer;
+import gov.nasa.worldwind.avlist.AVKey;
 
 public class RectangularNormalTessellator extends WWObjectImpl
   implements Tessellator
@@ -81,85 +82,102 @@ public class RectangularNormalTessellator extends WWObjectImpl
   private Material material = new Material(Color.WHITE);
   private Color lightColor = Color.WHITE;
   private Color ambientColor = new Color(0.1F, 0.1F, 0.1F);
+  protected int numLevel0LatSubdivisions = DEFAULT_NUM_LAT_SUBDIVISIONS;
+  protected int numLevel0LonSubdivisions = DEFAULT_NUM_LON_SUBDIVISIONS;
+  protected long updateFrequency = 2000; // milliseconds
 
-  public SectorGeometryList tessellate(DrawContext paramDrawContext)
-  {
-    String str;
-    if (paramDrawContext == null)
+      public SectorGeometryList tessellate(DrawContext dc)
     {
-      str = Logging.getMessage("nullValue.DrawContextIsNull");
-      Logging.logger().severe(str);
-      throw new IllegalArgumentException(str);
-    }
-    if (paramDrawContext.getView() == null)
-    {
-      str = Logging.getMessage("nullValue.ViewIsNull");
-      Logging.logger().severe(str);
-      throw new IllegalStateException(str);
-    }
-    if (!WorldWind.getMemoryCacheSet().containsCache(CACHE_ID))
-    {
-      long l = Configuration.getLongValue("gov.nasa.worldwind.avkey.SectorGeometryCacheSize", Long.valueOf(20000000L)).longValue();
-      BasicMemoryCache localBasicMemoryCache = new BasicMemoryCache((long)(0.85D * l), l);
-      localBasicMemoryCache.setName("Terrain");
-      WorldWind.getMemoryCacheSet().addCache(CACHE_ID, localBasicMemoryCache);
-    }
-    if (this.topLevels == null)
-      this.topLevels = createTopLevelTiles(paramDrawContext);
-    this.currentTiles.clear();
-    this.currentLevel = 0;
-    this.currentCoverage = null;
-    this.currentFrustum = paramDrawContext.getView().getFrustumInModelCoordinates();
-    Iterator localIterator = this.topLevels.iterator();
-    Object localObject;
-    while (localIterator.hasNext())
-    {
-      localObject = (RectTile)localIterator.next();
-      selectVisibleTiles(paramDrawContext, (RectTile)localObject);
-    }
-    this.currentTiles.setSector(this.currentCoverage);
-    localIterator = this.currentTiles.iterator();
-    while (localIterator.hasNext())
-    {
-      localObject = (SectorGeometry)localIterator.next();
-      makeVerts(paramDrawContext, (RectTile)localObject);
-    }
-    return (SectorGeometryList)this.currentTiles;
-  }
+        if (dc == null)
+        {
+            String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
 
-  private ArrayList<RectTile> createTopLevelTiles(DrawContext paramDrawContext)
-  {
-    ArrayList localArrayList = new ArrayList(50);
-    this.globe = paramDrawContext.getGlobe();
-    double d1 = 36.0D;
-    double d2 = 36.0D;
-    Object localObject1 = Angle.NEG90;
-    for (int i = 0; i < 5; i++)
-    {
-      Angle localAngle1 = ((Angle)localObject1).addDegrees(d1);
-      if (localAngle1.getDegrees() + 1.0D > 90.0D)
-        localAngle1 = Angle.POS90;
-      Object localObject2 = Angle.NEG180;
-      for (int j = 0; j < 10; j++)
-      {
-        Angle localAngle2 = ((Angle)localObject2).addDegrees(d2);
-        if (localAngle2.getDegrees() + 1.0D > 180.0D)
-          localAngle2 = Angle.POS180;
-        Sector localSector = new Sector((Angle)localObject1, localAngle1, (Angle)localObject2, localAngle2);
-        localArrayList.add(createTile(paramDrawContext, localSector, 0));
-        localObject2 = localAngle2;
-      }
-      localObject1 = localAngle1;
-    }
-    return (ArrayList<RectTile>)(ArrayList<RectTile>)localArrayList;
-  }
+        if (dc.getView() == null)
+        {
+            String msg = Logging.getMessage("nullValue.ViewIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalStateException(msg);
+        }
 
-  private RectTile createTile(DrawContext paramDrawContext, Sector paramSector, int paramInt)
-  {
-    Cylinder localCylinder = paramDrawContext.getGlobe().computeBoundingCylinder(paramDrawContext.getVerticalExaggeration(), paramSector);
-    double d = paramSector.getDeltaLatRadians() * paramDrawContext.getGlobe().getRadius() / this.density;
-    return new RectTile(this, localCylinder, paramInt, this.density, paramSector, d);
-  }
+        if (!WorldWind.getMemoryCacheSet().containsCache(CACHE_ID))
+        {
+            long size = Configuration.getLongValue(AVKey.SECTOR_GEOMETRY_CACHE_SIZE, 10000000L);
+            MemoryCache cache = new BasicMemoryCache((long) (0.85 * size), size);
+            cache.setName(CACHE_NAME);
+            WorldWind.getMemoryCacheSet().addCache(CACHE_ID, cache);
+        }
+
+        this.maxLevel = Configuration.getIntegerValue(AVKey.RECTANGULAR_TESSELLATOR_MAX_LEVEL, DEFAULT_MAX_LEVEL);
+
+        if (this.topLevels == null)
+            this.topLevels = this.createTopLevelTiles(dc);
+
+        this.currentTiles.clear();
+        this.currentLevel = 0;
+        this.currentCoverage = null;
+
+        this.currentFrustum = dc.getView().getFrustumInModelCoordinates();
+        for (RectTile tile : this.topLevels)
+        {
+            this.selectVisibleTiles(dc, tile);
+        }
+
+        this.currentTiles.setSector(this.currentCoverage);
+
+        for (SectorGeometry tile : this.currentTiles)
+        {
+            this.makeVerts(dc, (RectTile) tile);
+        }
+
+        return this.currentTiles;
+    }
+
+  protected ArrayList<RectTile> createTopLevelTiles(DrawContext dc)
+    {
+        ArrayList<RectTile> tops =
+            new ArrayList<RectTile>(this.numLevel0LatSubdivisions * this.numLevel0LonSubdivisions);
+
+        this.globe = dc.getGlobe();
+        double deltaLat = 180d / this.numLevel0LatSubdivisions;
+        double deltaLon = 360d / this.numLevel0LonSubdivisions;
+        Angle lastLat = Angle.NEG90;
+
+        for (int row = 0; row < this.numLevel0LatSubdivisions; row++)
+        {
+            Angle lat = lastLat.addDegrees(deltaLat);
+            if (lat.getDegrees() + 1d > 90d)
+                lat = Angle.POS90;
+
+            Angle lastLon = Angle.NEG180;
+
+            for (int col = 0; col < this.numLevel0LonSubdivisions; col++)
+            {
+                Angle lon = lastLon.addDegrees(deltaLon);
+                if (lon.getDegrees() + 1d > 180d)
+                    lon = Angle.POS180;
+
+                Sector tileSector = new Sector(lastLat, lat, lastLon, lon);
+                tops.add(this.createTile(dc, tileSector, 0));
+                lastLon = lon;
+            }
+            lastLat = lat;
+        }
+
+        return tops;
+    }
+
+protected RectTile createTile(DrawContext dc, Sector tileSector, int level)
+    {
+        Extent extent = Sector.computeBoundingBox(dc.getGlobe(), dc.getVerticalExaggeration(), tileSector);
+        double cellSize = tileSector.getDeltaLatRadians() * dc.getGlobe().getRadius() / this.density;
+
+        return new RectTile(this, extent, level, this.density, tileSector, cellSize);
+    }
+
+
 
   public boolean isMakeTileSkirts()
   {
@@ -170,6 +188,16 @@ public class RectangularNormalTessellator extends WWObjectImpl
   {
     this.makeTileSkirts = paramBoolean;
   }
+      public long getUpdateFrequency()
+    {
+        return this.updateFrequency;
+    }
+
+    public void setUpdateFrequency(long updateFrequency)
+    {
+        this.updateFrequency = updateFrequency;
+    }
+
 
   public Vec4 getLightDirection()
   {
@@ -213,58 +241,69 @@ public class RectangularNormalTessellator extends WWObjectImpl
     this.ambientColor = paramColor;
   }
 
-  private void selectVisibleTiles(DrawContext paramDrawContext, RectTile paramRectTile)
-  {
-    Extent localExtent = paramRectTile.getExtent();
-    if ((localExtent != null) && (!localExtent.intersects(this.currentFrustum)))
-      return;
-    if ((this.currentLevel < this.maxLevel - 1) && (needToSplit(paramDrawContext, paramRectTile)))
+private void selectVisibleTiles(DrawContext dc, RectTile tile)
     {
-      this.currentLevel += 1;
-      RectTile[] arrayOfRectTile1 = split(paramDrawContext, paramRectTile);
-      for (RectTile localRectTile : arrayOfRectTile1)
-        selectVisibleTiles(paramDrawContext, localRectTile);
-      this.currentLevel -= 1;
-      return;
+            Extent extent = tile.getExtent();
+            if (extent != null && !extent.intersects(this.currentFrustum))
+                    return;
+
+            if (this.currentLevel < this.maxLevel - 1 && this.needToSplit(dc, tile))
+            {
+                    ++this.currentLevel;
+                    RectTile[] subtiles = this.split(dc, tile);
+                    for (RectTile child : subtiles)
+                    {
+                            this.selectVisibleTiles(dc, child);
+                    }
+                    --this.currentLevel;
+                    return;
+            }
+            this.currentCoverage = tile.getSector().union(this.currentCoverage);
+            this.currentTiles.add(tile);
     }
-    this.currentCoverage = paramRectTile.getSector().union(this.currentCoverage);
-    this.currentTiles.add(paramRectTile);
-  }
 
-  private boolean needToSplit(DrawContext paramDrawContext, RectTile paramRectTile)
-  {
-    Vec4[] arrayOfVec4 = paramRectTile.sector.computeCornerPoints(paramDrawContext.getGlobe(), paramDrawContext.getVerticalExaggeration());
-    Vec4 localVec4 = paramRectTile.sector.computeCenterPoint(paramDrawContext.getGlobe(), paramDrawContext.getVerticalExaggeration());
-    View localView = paramDrawContext.getView();
-    double d1 = localView.getEyePoint().distanceTo3(arrayOfVec4[0]);
-    double d2 = localView.getEyePoint().distanceTo3(arrayOfVec4[1]);
-    double d3 = localView.getEyePoint().distanceTo3(arrayOfVec4[2]);
-    double d4 = localView.getEyePoint().distanceTo3(arrayOfVec4[3]);
-    double d5 = localView.getEyePoint().distanceTo3(localVec4);
-    double d6 = d1;
-    if (d2 < d6)
-      d6 = d2;
-    if (d3 < d6)
-      d6 = d3;
-    if (d4 < d6)
-      d6 = d4;
-    if (d5 < d6)
-      d6 = d5;
-    double d7 = Math.log10(d6);
-    int i = paramRectTile.log10CellSize <= d7 - 1.3D ? 1 : 0;
-    return i == 0;
-  }
 
-  private RectTile[] split(DrawContext paramDrawContext, RectTile paramRectTile)
-  {
-    Sector[] arrayOfSector = paramRectTile.sector.subdivide();
-    RectTile[] arrayOfRectTile = new RectTile[4];
-    arrayOfRectTile[0] = createTile(paramDrawContext, arrayOfSector[0], paramRectTile.getLevel() + 1);
-    arrayOfRectTile[1] = createTile(paramDrawContext, arrayOfSector[1], paramRectTile.getLevel() + 1);
-    arrayOfRectTile[2] = createTile(paramDrawContext, arrayOfSector[2], paramRectTile.getLevel() + 1);
-    arrayOfRectTile[3] = createTile(paramDrawContext, arrayOfSector[3], paramRectTile.getLevel() + 1);
-    return arrayOfRectTile;
-  }
+private boolean needToSplit(DrawContext dc, RectTile tile)
+    {
+            Vec4[] corners = tile.sector.computeCornerPoints(dc.getGlobe(), dc.getVerticalExaggeration());
+            Vec4 centerPoint = tile.sector.computeCenterPoint(dc.getGlobe(), dc.getVerticalExaggeration());
+
+            View view = dc.getView();
+            double d1 = view.getEyePoint().distanceTo3(corners[0]);
+            double d2 = view.getEyePoint().distanceTo3(corners[1]);
+            double d3 = view.getEyePoint().distanceTo3(corners[2]);
+            double d4 = view.getEyePoint().distanceTo3(corners[3]);
+            double d5 = view.getEyePoint().distanceTo3(centerPoint);
+
+            double minDistance = d1;
+            if (d2 < minDistance)
+                    minDistance = d2;
+            if (d3 < minDistance)
+                    minDistance = d3;
+            if (d4 < minDistance)
+                    minDistance = d4;
+            if (d5 < minDistance)
+                    minDistance = d5;
+
+            double logDist = Math.log10(minDistance);
+            boolean useTile = tile.log10CellSize <= (logDist - DEFAULT_LOG10_RESOLUTION_TARGET);
+
+            return !useTile;
+    }
+
+
+    private RectTile[] split(DrawContext dc, RectTile tile)
+    {
+            Sector[] sectors = tile.sector.subdivide();
+
+            RectTile[] subTiles = new RectTile[4];
+            subTiles[0] = this.createTile(dc, sectors[0], tile.level + 1);
+            subTiles[1] = this.createTile(dc, sectors[1], tile.level + 1);
+            subTiles[2] = this.createTile(dc, sectors[2], tile.level + 1);
+            subTiles[3] = this.createTile(dc, sectors[3], tile.level + 1);
+
+            return subTiles;
+    }
 
   private CacheKey createCacheKey(DrawContext paramDrawContext, RectTile paramRectTile)
   {
@@ -290,150 +329,169 @@ public class RectangularNormalTessellator extends WWObjectImpl
     }
 
 
-  public RenderInfo buildVerts(DrawContext paramDrawContext, RectTile paramRectTile, boolean paramBoolean)
-  {
-    int i = paramRectTile.density;
-    int j = i + 3;
-    int k = j * j;
-    DoubleBuffer localDoubleBuffer1 = BufferUtil.newDoubleBuffer(k * 3);
-    ArrayList localArrayList = computeLocations(paramRectTile);
-    double[] arrayOfDouble = new double[localArrayList.size()];
-    paramDrawContext.getGlobe().getElevations(paramRectTile.sector, localArrayList, paramRectTile.getResolution(), arrayOfDouble);
-    Globe localGlobe = paramDrawContext.getGlobe();
-    Angle localAngle1 = paramRectTile.sector.getDeltaLat().divide(i);
-    Angle localAngle2 = paramRectTile.sector.getMinLatitude();
-    Angle localAngle3 = paramRectTile.sector.getMaxLatitude();
-    Angle localAngle4 = paramRectTile.sector.getDeltaLon().divide(i);
-    Angle localAngle5 = paramRectTile.sector.getMinLongitude();
-    Angle localAngle6 = paramRectTile.sector.getMaxLongitude();
-    int m = 0;
-    double d2 = paramDrawContext.getVerticalExaggeration();
-    LatLon localLatLon1 = paramRectTile.sector.getCentroid();
-    Vec4 localVec42 = localGlobe.computePointFromPosition(localLatLon1.getLatitude(), localLatLon1.getLongitude(), 0.0D);
-    int n = 0;
-    Iterator localIterator = localArrayList.iterator();
-    double d1;
-    Vec4 localVec41;
-    for (int i1 = 0; i1 < j; i1++)
-      for (int i2 = 0; i2 < j; i2++)
-      {
-        LatLon localLatLon2 = (LatLon)localIterator.next();
-        d1 = d2 * arrayOfDouble[(n++)];
-        localVec41 = localGlobe.computePointFromPosition(localLatLon2.getLatitude(), localLatLon2.getLongitude(), d1);
-        localDoubleBuffer1.put(m++, localVec41.x - localVec42.x).put(m++, localVec41.y - localVec42.y).put(m++, localVec41.z - localVec42.z);
-      }
-    IntBuffer localIntBuffer = getIndices(i);
-    DoubleBuffer localDoubleBuffer2 = getNormals(i, localDoubleBuffer1, localIntBuffer, localVec42);
-    double d3 = paramBoolean ? Math.abs(localGlobe.getMinElevation() * d2) : 0.0D;
-    Angle localAngle7 = localAngle2;
-    for (int i3 = 0; i3 < j; i3++)
+public RenderInfo buildVerts(DrawContext dc, RectTile tile, boolean makeSkirts)
     {
-      n = i3 * j + 1;
-      d1 = d2 * arrayOfDouble[n];
-      d1 -= (d3 >= 0.0D ? d3 : -d3);
-      localVec41 = localGlobe.computePointFromPosition(localAngle7, localAngle5, d1);
-      m = i3 * j * 3;
-      localDoubleBuffer1.put(m++, localVec41.x - localVec42.x).put(m++, localVec41.y - localVec42.y).put(m++, localVec41.z - localVec42.z);
-      n += j - 2;
-      d1 = d2 * arrayOfDouble[n];
-      d1 -= (d3 >= 0.0D ? d3 : -d3);
-      localVec41 = localGlobe.computePointFromPosition(localAngle7, localAngle6, d1);
-      m = ((i3 + 1) * j - 1) * 3;
-      localDoubleBuffer1.put(m++, localVec41.x - localVec42.x).put(m++, localVec41.y - localVec42.y).put(m++, localVec41.z - localVec42.z);
-      if (i3 > i)
-      {
-        localAngle7 = localAngle3;
-      }
-      else
-      {
-        if (i3 == 0)
-          continue;
-        localAngle7 = localAngle7.add(localAngle1);
-      }
-    }
-    Angle localAngle8 = localAngle5;
-    for (int i4 = 0; i4 < j; i4++)
-    {
-      n = i4 + j;
-      d1 = d2 * arrayOfDouble[n];
-      d1 -= (d3 >= 0.0D ? d3 : -d3);
-      localVec41 = localGlobe.computePointFromPosition(localAngle2, localAngle8, d1);
-      m = i4 * 3;
-      localDoubleBuffer1.put(m++, localVec41.x - localVec42.x).put(m++, localVec41.y - localVec42.y).put(m++, localVec41.z - localVec42.z);
-      n += (j - 2) * j;
-      d1 = d2 * arrayOfDouble[n];
-      d1 -= (d3 >= 0.0D ? d3 : -d3);
-      localVec41 = localGlobe.computePointFromPosition(localAngle3, localAngle8, d1);
-      m = (j * (j - 1) + i4) * 3;
-      localDoubleBuffer1.put(m++, localVec41.x - localVec42.x).put(m++, localVec41.y - localVec42.y).put(m++, localVec41.z - localVec42.z);
-      if (i4 > i)
-      {
-        localAngle8 = localAngle6;
-      }
-      else
-      {
-        if (i4 == 0)
-          continue;
-        localAngle8 = localAngle8.add(localAngle4);
-      }
-    }
-    return new RenderInfo(i, localDoubleBuffer1, getTextureCoordinates(i), localDoubleBuffer2, localVec42);
-  }
+            int density = tile.density;
+            int side = density + 3;
+            int numVertices = side * side;
+            java.nio.DoubleBuffer verts = BufferUtil.newDoubleBuffer(numVertices * 3);
+    ArrayList<LatLon> latlons = this.computeLocations(tile);
+    double[] elevations = new double[latlons.size()];
+    dc.getGlobe().getElevations(tile.sector, latlons, tile.getResolution(), elevations);
 
-  private ArrayList<LatLon> computeLocations(RectTile paramRectTile)
-  {
-    int i = paramRectTile.density;
-    int j = (i + 3) * (i + 3);
-    Angle localAngle1 = paramRectTile.sector.getMaxLatitude();
-    Angle localAngle2 = paramRectTile.sector.getDeltaLat().divide(i);
-    Angle localAngle3 = paramRectTile.sector.getMinLatitude().subtract(localAngle2);
-    Angle localAngle4 = paramRectTile.sector.getMinLongitude();
-    Angle localAngle5 = paramRectTile.sector.getMaxLongitude();
-    Angle localAngle6 = paramRectTile.sector.getDeltaLon().divide(i);
-    ArrayList localArrayList = new ArrayList(j);
-    for (int k = 0; k <= i + 2; k++)
+            Globe globe = dc.getGlobe();
+
+            Angle dLat = tile.sector.getDeltaLat().divide(density);
+            Angle latMin = tile.sector.getMinLatitude();
+            Angle latMax = tile.sector.getMaxLatitude();
+
+            Angle dLon = tile.sector.getDeltaLon().divide(density);
+            Angle lonMin = tile.sector.getMinLongitude();
+            Angle lonMax = tile.sector.getMaxLongitude();
+
+            Angle lat, lon;
+            int iv = 0;
+            double elevation, verticalExaggeration = dc.getVerticalExaggeration();
+            Vec4 p;
+
+            LatLon centroid = tile.sector.getCentroid();
+            Vec4 refCenter = globe.computePointFromPosition(centroid.getLatitude(), centroid.getLongitude(), 0d);
+
+    int ie = 0;
+    Iterator<LatLon> latLonIter = latlons.iterator();
+
+    // Compute verts without skirts
+            for (int j = 0; j < side; j++)
+            {
+                    for (int i = 0; i < side; i++)
+                    {
+            LatLon latlon = latLonIter.next();
+            elevation = verticalExaggeration * elevations[ie++];
+                            p = globe.computePointFromPosition(latlon.getLatitude(), latlon.getLongitude(), elevation);
+                            verts.put(iv++, p.x - refCenter.x).put(iv++, p.y - refCenter.y).put(iv++, p.z - refCenter.z);
+                    }
+            }
+
+            // Compute indices and normals
+            java.nio.IntBuffer indices = getIndices(density);
+            java.nio.DoubleBuffer norms = getNormals(density, verts, indices, refCenter);
+
+            // Fold down the sides as skirts
+            double exaggeratedMinElevation = makeSkirts ? Math.abs(globe.getMinElevation() * verticalExaggeration) : 0;
+            lat = latMin;
+            for (int j = 0; j < side; j++)
+            {
+                    //min longitude side
+        ie = j * side + 1;
+        elevation = verticalExaggeration * elevations[ie];
+                    elevation -= exaggeratedMinElevation >= 0 ? exaggeratedMinElevation : -exaggeratedMinElevation;
+                    p = globe.computePointFromPosition(lat, lonMin, elevation);
+                    iv = (j * side) * 3;
+                    verts.put(iv++, p.x - refCenter.x).put(iv++, p.y - refCenter.y)
+                                    .put(iv++, p.z - refCenter.z);
+
+                    //max longitude side
+        ie += side - 2;
+        elevation = verticalExaggeration * elevations[ie];
+                    elevation -= exaggeratedMinElevation >= 0 ? exaggeratedMinElevation : -exaggeratedMinElevation;
+                    p = globe.computePointFromPosition(lat, lonMax, elevation);
+                    iv = ((j + 1) * side - 1) * 3;
+                    verts.put(iv++, p.x - refCenter.x).put(iv++, p.y - refCenter.y)
+                                    .put(iv++, p.z - refCenter.z);
+
+                    if (j > density)
+                            lat = latMax;
+                    else if (j != 0)
+                            lat = lat.add(dLat);
+            }
+
+            lon = lonMin;
+            for (int i = 0; i < side; i++)
+            {
+                    //min latitude side
+        ie = i + side;
+        elevation = verticalExaggeration * elevations[ie];
+                    elevation -= exaggeratedMinElevation >= 0 ? exaggeratedMinElevation : -exaggeratedMinElevation;
+                    p = globe.computePointFromPosition(latMin, lon, elevation);
+                    iv = i * 3;
+                    verts.put(iv++, p.x - refCenter.x).put(iv++, p.y - refCenter.y)
+                                    .put(iv++, p.z - refCenter.z);
+
+                    //max latitude side
+        ie += (side - 2) * side;
+        elevation = verticalExaggeration * elevations[ie];
+                    elevation -= exaggeratedMinElevation >= 0 ? exaggeratedMinElevation : -exaggeratedMinElevation;
+                    p = globe.computePointFromPosition(latMax, lon, elevation);
+                    iv = (side * (side - 1) + i) * 3;
+                    verts.put(iv++, p.x - refCenter.x).put(iv++, p.y - refCenter.y)
+                                    .put(iv++, p.z - refCenter.z);
+
+                    if (i > density)
+                            lon = lonMax;
+                    else if (i != 0)
+                            lon = lon.add(dLon);
+            }
+
+            return new RenderInfo(density, verts, getTextureCoordinates(density), norms, refCenter);
+    }
+
+private ArrayList<LatLon> computeLocations(RectTile tile)
+{
+    int density = tile.density;
+    int numVertices = (density + 3) * (density + 3);
+
+    Angle latMax = tile.sector.getMaxLatitude();
+    Angle dLat = tile.sector.getDeltaLat().divide(density);
+    Angle lat = tile.sector.getMinLatitude().subtract(dLat);
+
+    Angle lonMin = tile.sector.getMinLongitude();
+    Angle lonMax = tile.sector.getMaxLongitude();
+    Angle dLon = tile.sector.getDeltaLon().divide(density);
+
+    ArrayList<LatLon> latlons = new ArrayList<LatLon>(numVertices);
+    for (int j = 0; j <= density + 2; j++)
     {
-      Angle localAngle7 = localAngle4.subtract(localAngle6);
-      for (int m = 0; m <= i + 2; m++)
-      {
-        localArrayList.add(new LatLon(localAngle3, localAngle7));
-        localAngle7 = localAngle7.add(localAngle6);
-        if (localAngle7.degrees < -180.0D)
+        Angle lon = lonMin.subtract(dLon);
+        for (int i = 0; i <= density + 2; i++)
         {
-          localAngle7 = Angle.NEG180;
-        }
-        else
-        {
-          if (localAngle7.degrees <= 180.0D)
-            continue;
-          localAngle7 = Angle.POS180;
-        }
-      }
-      localAngle3 = localAngle3.add(localAngle2);
-    }
-    return localArrayList;
-  }
+            latlons.add(new LatLon(lat, lon));
 
-  private void renderMultiTexture(DrawContext paramDrawContext, RectTile paramRectTile, int paramInt)
-  {
-    String str;
-    if (paramDrawContext == null)
-    {
-      str = Logging.getMessage("nullValue.DrawContextIsNull");
-      Logging.logger().severe(str);
-      throw new IllegalArgumentException(str);
-    }
-    if (paramInt < 1)
-    {
-      str = Logging.getMessage("generic.NumTextureUnitsLessThanOne");
-      Logging.logger().severe(str);
-      throw new IllegalArgumentException(str);
-    }
-    render(paramDrawContext, paramRectTile, paramInt);
-  }
+            lon = lon.add(dLon);
 
-  private void render(DrawContext paramDrawContext, RectTile paramRectTile)
-  {
+            if (lon.degrees < -180)
+                lon = Angle.NEG180;
+            else if (lon.degrees > 180)
+                lon = Angle.POS180;
+        }
+
+        lat = lat.add(dLat);
+    }
+
+    return latlons;
+}
+
+  private void renderMultiTexture(DrawContext dc, RectTile tile, int numTextureUnits)
+    {
+            if (dc == null)
+            {
+                    String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+                    Logging.logger().severe(msg);
+                    throw new IllegalArgumentException(msg);
+            }
+
+            if (numTextureUnits < 1)
+            {
+                    String msg = Logging
+                                    .getMessage("generic.NumTextureUnitsLessThanOne");
+                    Logging.logger().severe(msg);
+                    throw new IllegalArgumentException(msg);
+            }
+
+            this.render(dc, tile, numTextureUnits);
+    }
+
+    private void render(DrawContext paramDrawContext, RectTile paramRectTile)
+    {
     if (paramDrawContext == null)
     {
       String str = Logging.getMessage("nullValue.DrawContextIsNull");
@@ -441,124 +499,158 @@ public class RectangularNormalTessellator extends WWObjectImpl
       throw new IllegalArgumentException(str);
     }
     render(paramDrawContext, paramRectTile, 1);
-  }
-
-  private long render(DrawContext paramDrawContext, RectTile paramRectTile, int paramInt)
-  {
-    if (paramRectTile.ri == null)
-    {
-            String localObject1 = Logging.getMessage("nullValue.RenderInfoIsNull");
-      Logging.logger().severe((String)localObject1);
-      throw new IllegalStateException((String)localObject1);
     }
-    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, paramRectTile.ri.referenceCenter);
-    if ((!paramDrawContext.isPickingMode()) && (this.lightDirection != null))
-      beginLighting(paramDrawContext);
-    Object localObject1 = paramDrawContext.getGL();
-    ((GL)localObject1).glPushClientAttrib(2);
-    ((GL)localObject1).glEnableClientState(32884);
-    ((GL)localObject1).glVertexPointer(3, 5130, 0, paramRectTile.ri.vertices.rewind());
-    ((GL)localObject1).glEnableClientState(32885);
-    ((GL)localObject1).glNormalPointer(5130, 0, paramRectTile.ri.normals.rewind());
-    for (int i = 0; i < paramInt; i++)
-    {
-      ((GL)localObject1).glClientActiveTexture(33984 + i);
-      ((GL)localObject1).glEnableClientState(32888);
-      Object localObject2 = paramDrawContext.getValue("gov.nasa.worldwind.avkey.TextureCoordinates");
-      if ((localObject2 != null) && ((localObject2 instanceof DoubleBuffer)))
-        ((GL)localObject1).glTexCoordPointer(2, 5130, 0, ((DoubleBuffer)localObject2).rewind());
-      else
-        ((GL)localObject1).glTexCoordPointer(2, 5130, 0, paramRectTile.ri.texCoords.rewind());
-    }
-    ((GL)localObject1).glDrawElements(5, paramRectTile.ri.indices.limit(), 5125, paramRectTile.ri.indices.rewind());
-    ((GL)localObject1).glDisableClientState(32885);
-    ((GL)localObject1).glPopClientAttrib();
-    if ((!paramDrawContext.isPickingMode()) && (this.lightDirection != null))
-      endLighting(paramDrawContext);
-    paramDrawContext.getView().popReferenceCenter(paramDrawContext);
-    return paramRectTile.ri.indices.limit() - 2;
-  }
 
-  private void beginLighting(DrawContext paramDrawContext)
-  {
-    GL localGL = paramDrawContext.getGL();
-    localGL.glPushAttrib(8257);
-    this.material.apply(localGL, 1028);
-    localGL.glDisable(2903);
-    float[] arrayOfFloat1 = { (float)(-this.lightDirection.x), (float)(-this.lightDirection.y), (float)(-this.lightDirection.z), 0.0F };
-    float[] arrayOfFloat2 = new float[4];
-    float[] arrayOfFloat3 = new float[4];
-    this.lightColor.getRGBComponents(arrayOfFloat2);
-    this.ambientColor.getRGBComponents(arrayOfFloat3);
-    localGL.glLightfv(16385, 4611, arrayOfFloat1, 0);
-    localGL.glLightfv(16385, 4609, arrayOfFloat2, 0);
-    localGL.glLightfv(16385, 4608, arrayOfFloat3, 0);
-    localGL.glDisable(16384);
-    localGL.glEnable(16385);
-    localGL.glEnable(2896);
-  }
+    private long render(DrawContext dc, RectTile tile, int numTextureUnits)
+        {
+                if (tile.ri == null)
+                {
+                        String msg = Logging.getMessage("nullValue.RenderInfoIsNull");
+                        Logging.logger().severe(msg);
+                        throw new IllegalStateException(msg);
+                }
 
-  private void endLighting(DrawContext paramDrawContext)
-  {
-    GL localGL = paramDrawContext.getGL();
-    localGL.glDisable(16385);
-    localGL.glEnable(16384);
-    localGL.glDisable(2896);
-    localGL.glPopAttrib();
-  }
+                dc.getView().pushReferenceCenter(dc, tile.ri.referenceCenter);
 
-  private void renderWireframe(DrawContext paramDrawContext, RectTile paramRectTile, boolean paramBoolean1, boolean paramBoolean2)
-  {
-    if (paramDrawContext == null)
-    {
-      String localObject = Logging.getMessage("nullValue.DrawContextIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalArgumentException((String)localObject);
-    }
-    if (paramRectTile.ri == null)
-    {
-      String localObject = Logging.getMessage("nullValue.RenderInfoIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalStateException((String)localObject);
-    }
-    Object localObject = getIndices(paramRectTile.ri.density);
-    ((IntBuffer)localObject).rewind();
-    paramDrawContext.getView().pushReferenceCenter(paramDrawContext, paramRectTile.ri.referenceCenter);
-    GL localGL = paramDrawContext.getGL();
-    localGL.glPushAttrib(270601);
-    localGL.glEnable(3042);
-    localGL.glBlendFunc(770, 1);
-    localGL.glDisable(2929);
-    localGL.glEnable(2884);
-    localGL.glCullFace(1029);
-    localGL.glDisable(3553);
-    localGL.glColor4d(1.0D, 1.0D, 1.0D, 0.2D);
-    localGL.glPolygonMode(1028, 6913);
-    if (paramBoolean1)
-    {
-      localGL.glPushClientAttrib(2);
-      localGL.glEnableClientState(32884);
-      localGL.glVertexPointer(3, 5130, 0, paramRectTile.ri.vertices);
-      localGL.glDrawElements(5, ((IntBuffer)localObject).limit(), 5125, (Buffer)localObject);
-      localGL.glPopClientAttrib();
-    }
-    paramDrawContext.getView().popReferenceCenter(paramDrawContext);
-    if (paramBoolean2)
-      renderPatchBoundary(paramDrawContext, paramRectTile, localGL);
-    localGL.glPopAttrib();
-  }
+        if (!dc.isPickingMode() && this.lightDirection != null)
+            beginLighting(dc);
 
-  private void renderPatchBoundary(DrawContext paramDrawContext, RectTile paramRectTile, GL paramGL)
-  {
-    paramGL.glColor4d(1.0D, 0.0D, 0.0D, 1.0D);
-    Vec4[] arrayOfVec4 = paramRectTile.sector.computeCornerPoints(paramDrawContext.getGlobe(), paramDrawContext.getVerticalExaggeration());
-    paramGL.glBegin(7);
-    paramGL.glVertex3d(arrayOfVec4[0].x, arrayOfVec4[0].y, arrayOfVec4[0].z);
-    paramGL.glVertex3d(arrayOfVec4[1].x, arrayOfVec4[1].y, arrayOfVec4[1].z);
-    paramGL.glVertex3d(arrayOfVec4[2].x, arrayOfVec4[2].y, arrayOfVec4[2].z);
-    paramGL.glVertex3d(arrayOfVec4[3].x, arrayOfVec4[3].y, arrayOfVec4[3].z);
-    paramGL.glEnd();
-  }
+        GL gl = dc.getGL();
+                gl.glPushClientAttrib(GL.GL_CLIENT_VERTEX_ARRAY_BIT);
+                gl.glEnableClientState(GL.GL_VERTEX_ARRAY);
+                gl.glVertexPointer(3, GL.GL_DOUBLE, 0, tile.ri.vertices.rewind());
+
+                gl.glEnableClientState(GL.GL_NORMAL_ARRAY);
+                gl.glNormalPointer(GL.GL_DOUBLE, 0, tile.ri.normals.rewind());
+
+                for (int i = 0; i < numTextureUnits; i++)
+                {
+                        gl.glClientActiveTexture(GL.GL_TEXTURE0 + i);
+                        gl.glEnableClientState(GL.GL_TEXTURE_COORD_ARRAY);
+            Object texCoords = dc.getValue(AVKey.TEXTURE_COORDINATES);
+            if (texCoords != null && texCoords instanceof DoubleBuffer)
+                gl.glTexCoordPointer(2, GL.GL_DOUBLE, 0, ((DoubleBuffer) texCoords).rewind());
+            else
+                gl.glTexCoordPointer(2, GL.GL_DOUBLE, 0, tile.ri.texCoords.rewind());
+                }
+
+                gl.glDrawElements(javax.media.opengl.GL.GL_TRIANGLE_STRIP,
+                                tile.ri.indices.limit(), javax.media.opengl.GL.GL_UNSIGNED_INT,
+                                tile.ri.indices.rewind());
+
+                gl.glDisableClientState(GL.GL_NORMAL_ARRAY);
+                gl.glPopClientAttrib();
+
+        if (!dc.isPickingMode() && this.lightDirection != null)
+            endLighting(dc);
+
+        dc.getView().popReferenceCenter(dc);
+
+                return tile.ri.indices.limit() - 2; // return number of triangles rendered
+        }
+
+    private void beginLighting(DrawContext dc)
+    {
+        GL gl = dc.getGL();
+        gl.glPushAttrib(GL.GL_ENABLE_BIT | GL.GL_CURRENT_BIT | GL.GL_LIGHTING_BIT);
+
+        this.material.apply(gl, GL.GL_FRONT);
+        gl.glDisable(GL.GL_COLOR_MATERIAL);
+
+        float[] lightPosition = {(float)-lightDirection.x, (float)-lightDirection.y, (float)-lightDirection.z, 0.0f};
+        float[] lightDiffuse = new float[4];
+        float[] lightAmbient = new float[4];
+        lightColor.getRGBComponents(lightDiffuse);
+        ambientColor.getRGBComponents(lightAmbient);
+
+        gl.glLightfv(GL.GL_LIGHT1, GL.GL_POSITION, lightPosition, 0);
+        gl.glLightfv(GL.GL_LIGHT1, GL.GL_DIFFUSE, lightDiffuse, 0);
+        gl.glLightfv(GL.GL_LIGHT1, GL.GL_AMBIENT, lightAmbient, 0);
+
+        gl.glDisable(GL.GL_LIGHT0);
+        gl.glEnable(GL.GL_LIGHT1);
+        gl.glEnable(GL.GL_LIGHTING);
+    }
+
+    private void endLighting(DrawContext dc)
+    {
+        GL gl = dc.getGL();
+
+        gl.glDisable(GL.GL_LIGHT1);
+        gl.glEnable(GL.GL_LIGHT0);
+        gl.glDisable(GL.GL_LIGHTING);
+
+        gl.glPopAttrib();
+    }
+
+private void renderWireframe(DrawContext dc, RectTile tile, boolean showTriangles, boolean showTileBoundary)
+    {
+            if (dc == null)
+            {
+                    String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+                    Logging.logger().severe(msg);
+                    throw new IllegalArgumentException(msg);
+            }
+
+            if (tile.ri == null)
+            {
+                    String msg = Logging.getMessage("nullValue.RenderInfoIsNull");
+                    Logging.logger().severe(msg);
+                    throw new IllegalStateException(msg);
+            }
+
+            java.nio.IntBuffer indices = getIndices(tile.ri.density);
+            indices.rewind();
+
+            dc.getView().pushReferenceCenter(dc, tile.ri.referenceCenter);
+
+            javax.media.opengl.GL gl = dc.getGL();
+            gl.glPushAttrib(GL.GL_DEPTH_BUFFER_BIT | GL.GL_POLYGON_BIT
+                            | GL.GL_TEXTURE_BIT | GL.GL_ENABLE_BIT | GL.GL_CURRENT_BIT);
+            gl.glEnable(GL.GL_BLEND);
+            gl.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE);
+            gl.glDisable(javax.media.opengl.GL.GL_DEPTH_TEST);
+            gl.glEnable(javax.media.opengl.GL.GL_CULL_FACE);
+            gl.glCullFace(javax.media.opengl.GL.GL_BACK);
+            gl.glDisable(javax.media.opengl.GL.GL_TEXTURE_2D);
+            gl.glColor4d(1d, 1d, 1d, 0.2);
+            gl.glPolygonMode(javax.media.opengl.GL.GL_FRONT,
+                            javax.media.opengl.GL.GL_LINE);
+
+            if (showTriangles)
+            {
+                    gl.glPushClientAttrib(GL.GL_CLIENT_VERTEX_ARRAY_BIT);
+                    gl.glEnableClientState(GL.GL_VERTEX_ARRAY);
+
+                    gl.glVertexPointer(3, GL.GL_DOUBLE, 0, tile.ri.vertices);
+                    gl.glDrawElements(javax.media.opengl.GL.GL_TRIANGLE_STRIP, indices
+                                    .limit(), javax.media.opengl.GL.GL_UNSIGNED_INT, indices);
+
+                    gl.glPopClientAttrib();
+            }
+
+            dc.getView().popReferenceCenter(dc);
+
+            if (showTileBoundary)
+                    this.renderPatchBoundary(dc, tile, gl);
+
+            gl.glPopAttrib();
+    }
+
+private void renderPatchBoundary(DrawContext dc, RectTile tile, GL gl)
+    {
+            // TODO: Currently only works if called from renderWireframe because no state is set here.
+            // TODO: Draw the boundary using the vertices along the boundary rather than just at the corners.
+            gl.glColor4d(1d, 0, 0, 1d);
+            Vec4[] corners = tile.sector.computeCornerPoints(dc.getGlobe(), dc.getVerticalExaggeration());
+
+            gl.glBegin(javax.media.opengl.GL.GL_QUADS);
+            gl.glVertex3d(corners[0].x, corners[0].y, corners[0].z);
+            gl.glVertex3d(corners[1].x, corners[1].y, corners[1].z);
+            gl.glVertex3d(corners[2].x, corners[2].y, corners[2].z);
+            gl.glVertex3d(corners[3].x, corners[3].y, corners[3].z);
+            gl.glEnd();
+    }
 
   private void renderBoundingVolume(DrawContext paramDrawContext, RectTile paramRectTile)
   {
@@ -569,120 +661,167 @@ public class RectangularNormalTessellator extends WWObjectImpl
       ((Cylinder)localExtent).render(paramDrawContext);
   }
 
-   private PickedObject[] pick(DrawContext dc, RectTile tile,
-                        List<? extends Point> pickPoints)
-        {
-                if (dc == null)
-                {
-                        String msg = Logging.getMessage("nullValue.DrawContextIsNull");
-                        Logging.logger().severe(msg);
-                        throw new IllegalArgumentException(msg);
-                }
-
-                if (pickPoints.size() == 0)
-                        return null;
-
-                if (tile.ri == null)
-                        return null;
-
-                PickedObject[] pos = new PickedObject[pickPoints.size()];
-                this.renderTrianglesWithUniqueColors(dc, tile);
-                for (int i = 0; i < pickPoints.size(); i++)
-                {
-                        pos[i] = this.resolvePick(dc, tile, pickPoints.get(i));
-                }
-
-                return pos;
-        }
-
-
-  private void pick(DrawContext paramDrawContext, RectTile paramRectTile, Point paramPoint)
-  {
-    if (paramDrawContext == null)
+   private PickedObject[] pick(DrawContext dc, RectTile tile, List<? extends Point> pickPoints)
     {
-      String localObject = Logging.getMessage("nullValue.DrawContextIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalArgumentException((String)localObject);
-    }
-    if (paramRectTile.ri == null)
-      return;
-    renderTrianglesWithUniqueColors(paramDrawContext, paramRectTile);
-    Object localObject = resolvePick(paramDrawContext, paramRectTile, paramPoint);
-    if (localObject != null)
-      paramDrawContext.addPickedObject((PickedObject)localObject);
-  }
+            if (dc == null)
+            {
+                    String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+                    Logging.logger().severe(msg);
+                    throw new IllegalArgumentException(msg);
+            }
 
-  private void renderTrianglesWithUniqueColors(DrawContext paramDrawContext, RectTile paramRectTile)
-  {
-    if (paramDrawContext == null)
+            if (pickPoints.size() == 0)
+                    return null;
+
+            if (tile.ri == null)
+                    return null;
+
+            PickedObject[] pos = new PickedObject[pickPoints.size()];
+            this.renderTrianglesWithUniqueColors(dc, tile);
+            for (int i = 0; i < pickPoints.size(); i++)
+            {
+                    pos[i] = this.resolvePick(dc, tile, pickPoints.get(i));
+            }
+
+            return pos;
+    }
+
+private void pick(DrawContext dc, RectTile tile, Point pickPoint)
+	{
+		if (dc == null)
+		{
+			String msg = Logging.getMessage("nullValue.DrawContextIsNull");
+			Logging.logger().severe(msg);
+			throw new IllegalArgumentException(msg);
+		}
+
+		if (tile.ri == null)
+			return;
+
+		renderTrianglesWithUniqueColors(dc, tile);
+		PickedObject po = this.resolvePick(dc, tile, pickPoint);
+		if (po != null)
+			dc.addPickedObject(po);
+	}
+
+  private void renderTrianglesWithUniqueColors(DrawContext dc, RectTile tile)
     {
-      String localObject = Logging.getMessage("nullValue.DrawContextIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalStateException((String)localObject);
+            if (dc == null)
+            {
+                    String message = Logging.getMessage("nullValue.DrawContextIsNull");
+                    Logging.logger().severe(message);
+                    throw new IllegalStateException(message);
+            }
+
+            if (tile.ri.vertices == null)
+                    return;
+
+            tile.ri.vertices.rewind();
+            tile.ri.indices.rewind();
+
+            javax.media.opengl.GL gl = dc.getGL();
+
+            if (null != tile.ri.referenceCenter)
+                    dc.getView().pushReferenceCenter(dc, tile.ri.referenceCenter);
+
+            tile.minColorCode = dc.getUniquePickColor().getRGB();
+            int trianglesNum = tile.ri.indices.capacity() - 2;
+
+            gl.glBegin(GL.GL_TRIANGLES);
+            for (int i = 0; i < trianglesNum; i++)
+            {
+                    java.awt.Color color = dc.getUniquePickColor();
+                    gl.glColor3ub((byte) (color.getRed() & 0xFF), (byte) (color
+                                    .getGreen() & 0xFF), (byte) (color.getBlue() & 0xFF));
+
+                    int vIndex = 3 * tile.ri.indices.get(i);
+                    gl.glVertex3d(tile.ri.vertices.get(vIndex), tile.ri.vertices
+                                    .get(vIndex + 1), tile.ri.vertices.get(vIndex + 2));
+
+                    vIndex = 3 * tile.ri.indices.get(i + 1);
+                    gl.glVertex3d(tile.ri.vertices.get(vIndex), tile.ri.vertices
+                                    .get(vIndex + 1), tile.ri.vertices.get(vIndex + 2));
+
+                    vIndex = 3 * tile.ri.indices.get(i + 2);
+                    gl.glVertex3d(tile.ri.vertices.get(vIndex), tile.ri.vertices
+                                    .get(vIndex + 1), tile.ri.vertices.get(vIndex + 2));
+            }
+            gl.glEnd();
+            tile.maxColorCode = dc.getUniquePickColor().getRGB();
+
+            if (null != tile.ri.referenceCenter)
+                    dc.getView().popReferenceCenter(dc);
     }
-    if (paramRectTile.ri.vertices == null)
-      return;
-    paramRectTile.ri.vertices.rewind();
-    paramRectTile.ri.indices.rewind();
-    Object localObject = paramDrawContext.getGL();
-    if (null != paramRectTile.ri.referenceCenter)
-      paramDrawContext.getView().pushReferenceCenter(paramDrawContext, paramRectTile.ri.referenceCenter);
-    paramRectTile.minColorCode = paramDrawContext.getUniquePickColor().getRGB();
-    int i = paramRectTile.ri.indices.capacity() - 2;
-    ((GL)localObject).glBegin(4);
-    for (int j = 0; j < i; j++)
+
+  private PickedObject resolvePick(DrawContext dc, RectTile tile, Point pickPoint)
     {
-      Color localColor = paramDrawContext.getUniquePickColor();
-      ((GL)localObject).glColor3ub((byte)(localColor.getRed() & 0xFF), (byte)(localColor.getGreen() & 0xFF), (byte)(localColor.getBlue() & 0xFF));
-      int k = 3 * paramRectTile.ri.indices.get(j);
-      ((GL)localObject).glVertex3d(paramRectTile.ri.vertices.get(k), paramRectTile.ri.vertices.get(k + 1), paramRectTile.ri.vertices.get(k + 2));
-      k = 3 * paramRectTile.ri.indices.get(j + 1);
-      ((GL)localObject).glVertex3d(paramRectTile.ri.vertices.get(k), paramRectTile.ri.vertices.get(k + 1), paramRectTile.ri.vertices.get(k + 2));
-      k = 3 * paramRectTile.ri.indices.get(j + 2);
-      ((GL)localObject).glVertex3d(paramRectTile.ri.vertices.get(k), paramRectTile.ri.vertices.get(k + 1), paramRectTile.ri.vertices.get(k + 2));
+            int colorCode = this.pickSupport.getTopColor(dc, pickPoint);
+            if (colorCode < tile.minColorCode || colorCode > tile.maxColorCode)
+                    return null;
+
+            double EPSILON = (double) 0.00001f;
+
+            int triangleIndex = colorCode - tile.minColorCode - 1;
+
+            if (tile.ri.indices == null
+                            || triangleIndex >= (tile.ri.indices.capacity() - 2))
+                    return null;
+
+            double centerX = tile.ri.referenceCenter.x;
+            double centerY = tile.ri.referenceCenter.y;
+            double centerZ = tile.ri.referenceCenter.z;
+
+            int vIndex = 3 * tile.ri.indices.get(triangleIndex);
+            Vec4 v0 = new Vec4((tile.ri.vertices.get(vIndex++) + centerX),
+                            (tile.ri.vertices.get(vIndex++) + centerY), (tile.ri.vertices
+                                            .get(vIndex) + centerZ));
+
+            vIndex = 3 * tile.ri.indices.get(triangleIndex + 1);
+            Vec4 v1 = new Vec4((tile.ri.vertices.get(vIndex++) + centerX),
+                            (tile.ri.vertices.get(vIndex++) + centerY), (tile.ri.vertices
+                                            .get(vIndex) + centerZ));
+
+            vIndex = 3 * tile.ri.indices.get(triangleIndex + 2);
+            Vec4 v2 = new Vec4((tile.ri.vertices.get(vIndex++) + centerX),
+                            (tile.ri.vertices.get(vIndex++) + centerY), (tile.ri.vertices
+                                            .get(vIndex) + centerZ));
+
+            // get triangle edge vectors and plane normal
+            Vec4 e1 = v1.subtract3(v0);
+            Vec4 e2 = v2.subtract3(v0);
+            Vec4 N = e1.cross3(e2); // if N is 0, the triangle is degenerate, we are not dealing with it
+
+            Line ray = dc.getView().computeRayFromScreenPoint(pickPoint.getX(),
+                            pickPoint.getY());
+
+            Vec4 w0 = ray.getOrigin().subtract3(v0);
+            double a = -N.dot3(w0);
+            double b = N.dot3(ray.getDirection());
+            if (java.lang.Math.abs(b) < EPSILON) // ray is parallel to triangle plane
+                    return null; // if a == 0 , ray lies in triangle plane
+            double r = a / b;
+
+            Vec4 intersect = ray.getOrigin().add3(ray.getDirection().multiply3(r));
+            Position pp = dc.getGlobe().computePositionFromPoint(intersect);
+
+            // Draw the elevation from the elevation model, not the geode.
+            double elev = dc.getGlobe().getElevation(pp.getLatitude(),
+                            pp.getLongitude());
+            Position p = new Position(pp.getLatitude(), pp.getLongitude(), elev);
+
+            return new PickedObject(pickPoint, colorCode, p, pp.getLatitude(), pp
+                            .getLongitude(), elev, true);
     }
-    ((GL)localObject).glEnd();
-    paramRectTile.maxColorCode = paramDrawContext.getUniquePickColor().getRGB();
-    if (null != paramRectTile.ri.referenceCenter)
-      paramDrawContext.getView().popReferenceCenter(paramDrawContext);
-  }
 
-  private PickedObject resolvePick(DrawContext paramDrawContext, RectTile paramRectTile, Point paramPoint)
-  {
-    int i = this.pickSupport.getTopColor(paramDrawContext, paramPoint);
-    if ((i < paramRectTile.minColorCode) || (i > paramRectTile.maxColorCode))
-      return null;
-    double d1 = 9.999999747378752E-006D;
-    int j = i - paramRectTile.minColorCode - 1;
-    if ((paramRectTile.ri.indices == null) || (j >= paramRectTile.ri.indices.capacity() - 2))
-      return null;
-    double d2 = paramRectTile.ri.referenceCenter.x;
-    double d3 = paramRectTile.ri.referenceCenter.y;
-    double d4 = paramRectTile.ri.referenceCenter.z;
-    int k = 3 * paramRectTile.ri.indices.get(j);
-    Vec4 localVec41 = new Vec4(paramRectTile.ri.vertices.get(k++) + d2, paramRectTile.ri.vertices.get(k++) + d3, paramRectTile.ri.vertices.get(k) + d4);
-    k = 3 * paramRectTile.ri.indices.get(j + 1);
-    Vec4 localVec42 = new Vec4(paramRectTile.ri.vertices.get(k++) + d2, paramRectTile.ri.vertices.get(k++) + d3, paramRectTile.ri.vertices.get(k) + d4);
-    k = 3 * paramRectTile.ri.indices.get(j + 2);
-    Vec4 localVec43 = new Vec4(paramRectTile.ri.vertices.get(k++) + d2, paramRectTile.ri.vertices.get(k++) + d3, paramRectTile.ri.vertices.get(k) + d4);
-    Vec4 localVec44 = localVec42.subtract3(localVec41);
-    Vec4 localVec45 = localVec43.subtract3(localVec41);
-    Vec4 localVec46 = localVec44.cross3(localVec45);
-    Line localLine = paramDrawContext.getView().computeRayFromScreenPoint(paramPoint.getX(), paramPoint.getY());
-    Vec4 localVec47 = localLine.getOrigin().subtract3(localVec41);
-    double d5 = -localVec46.dot3(localVec47);
-    double d6 = localVec46.dot3(localLine.getDirection());
-    if (Math.abs(d6) < d1)
-      return null;
-    double d7 = d5 / d6;
-    Vec4 localVec48 = localLine.getOrigin().add3(localLine.getDirection().multiply3(d7));
-    Position localPosition1 = paramDrawContext.getGlobe().computePositionFromPoint(localVec48);
-    double d8 = paramDrawContext.getGlobe().getElevation(localPosition1.getLatitude(), localPosition1.getLongitude());
-    Position localPosition2 = new Position(localPosition1.getLatitude(), localPosition1.getLongitude(), d8);
-    return new PickedObject(paramPoint, i, localPosition2, localPosition1.getLatitude(), localPosition1.getLongitude(), d8, true);
-  }
-
-private Intersection[] intersect(RectTile tile, Line line)
+/**
+     * Determines if and where a ray intersects a <code>RectTile</code> geometry.
+     *
+     * @param tile the <Code>RectTile</code> which geometry is to be tested for intersection.
+     * @param line the ray for which an intersection is to be found.
+     * @return an array of <code>Intersection</code> sorted by increasing distance from the line origin, or null if
+     * no intersection was found.
+     */
+    private Intersection[] intersect(RectTile tile, Line line)
     {
         if (line == null)
         {
@@ -824,70 +963,114 @@ private Intersection[] intersect(RectTile tile, Line line)
         return hits;
     }
 
-
-  private Intersection[] intersect(RectTile paramRectTile, double paramDouble)
-  {
-    if (paramRectTile.ri.vertices == null)
-      return null;
-    Cylinder localCylinder = (Cylinder)paramRectTile.getExtent();
-    if (!(this.globe.isPointAboveElevation(localCylinder.getBottomCenter(), paramDouble) ^ this.globe.isPointAboveElevation(localCylinder.getTopCenter(), paramDouble)))
-      return null;
-    ArrayList localArrayList = new ArrayList();
-    int[] arrayOfInt = new int[paramRectTile.ri.indices.limit()];
-    double[] arrayOfDouble = new double[paramRectTile.ri.vertices.limit()];
-    paramRectTile.ri.indices.rewind();
-    paramRectTile.ri.vertices.rewind();
-    paramRectTile.ri.indices.get(arrayOfInt, 0, arrayOfInt.length);
-    paramRectTile.ri.vertices.get(arrayOfDouble, 0, arrayOfDouble.length);
-    paramRectTile.ri.indices.rewind();
-    paramRectTile.ri.vertices.rewind();
-    int i = paramRectTile.ri.indices.capacity() - 2;
-    double d1 = paramRectTile.ri.referenceCenter.x;
-    double d2 = paramRectTile.ri.referenceCenter.y;
-    double d3 = paramRectTile.ri.referenceCenter.z;
-    int j = (this.density + 2) * 2 + 6;
-    int k = i - j;
-    int m = -1;
-        int n;
-    for (n = j; n < k; n += 2)
+  /**
+     * Determines if and where a <code>RectTile</code> geometry intersects the globe ellipsoid at a given elevation.
+     * The returned array of <code>Intersection</code> describes a list of individual segments - two
+     * <code>Intersection</code> for each, corresponding to each geometry triangle that intersects the given elevation.
+     *
+     * @param tile the <Code>RectTile</code> which geometry is to be tested for intersection.
+     * @param elevation the elevation for which intersection points are to be found.
+     * @return an array of <code>Intersection</code> pairs or null if no intersection was found.
+     */
+    private Intersection[] intersect(RectTile tile, double elevation)
     {
-      m = m == this.density - 1 ? -4 : m + 1;
-      if (m < 0)
-        continue;
-      int i1 = 3 * arrayOfInt[n];
-      Vec4 localVec41 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      i1 = 3 * arrayOfInt[(n + 1)];
-      Vec4 localVec42 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      i1 = 3 * arrayOfInt[(n + 2)];
-      Vec4 localVec43 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      i1 = 3 * arrayOfInt[(n + 3)];
-      Vec4 localVec44 = new Vec4(arrayOfDouble[(i1++)] + d1, arrayOfDouble[(i1++)] + d2, arrayOfDouble[i1] + d3);
-      Intersection[] arrayOfIntersection2;
-      if ((arrayOfIntersection2 = this.globe.intersect(new Triangle(localVec41, localVec42, localVec43), paramDouble)) != null)
-      {
-        localArrayList.add(arrayOfIntersection2[0]);
-        localArrayList.add(arrayOfIntersection2[1]);
-      }
-      if ((arrayOfIntersection2 = this.globe.intersect(new Triangle(localVec42, localVec43, localVec44), paramDouble)) == null)
-        continue;
-      localArrayList.add(arrayOfIntersection2[0]);
-      localArrayList.add(arrayOfIntersection2[1]);
-    }
-    n = localArrayList.size();
-    if (n == 0)
-      return null;
-    Intersection[] arrayOfIntersection1 = new Intersection[n];
-    localArrayList.toArray(arrayOfIntersection1);
-    return arrayOfIntersection1;
-  }
+        if (tile.ri.vertices == null)
+            return null;
 
-  private Vec4 getSurfacePoint(RectTile paramRectTile, Angle paramAngle1, Angle paramAngle2, double paramDouble)
-  {
-    Vec4 localVec4 = getSurfacePoint(paramRectTile, paramAngle1, paramAngle2);
-    if ((paramDouble != 0.0D) && (localVec4 != null))
-      localVec4 = applyOffset(this.globe, localVec4, paramDouble);
-    return localVec4;
-  }
+        // Check whether the tile includes the intersection elevation - assume cylinder as Extent
+        Cylinder cylinder = ((Cylinder)tile.getExtent());
+        if (!(globe.isPointAboveElevation(cylinder.getBottomCenter(), elevation)
+            ^ globe.isPointAboveElevation(cylinder.getTopCenter(), elevation)))
+            return null;
+
+        Intersection[] hits;
+        ArrayList<Intersection> list = new ArrayList<Intersection>();
+
+        int[] indices = new int[tile.ri.indices.limit()];
+        double[] coords = new double[tile.ri.vertices.limit()];
+        tile.ri.indices.rewind();
+        tile.ri.vertices.rewind();
+        tile.ri.indices.get(indices, 0, indices.length);
+        tile.ri.vertices.get(coords, 0, coords.length);
+        tile.ri.indices.rewind();
+        tile.ri.vertices.rewind();
+
+        int trianglesNum = tile.ri.indices.capacity() - 2;
+        double centerX = tile.ri.referenceCenter.x;
+        double centerY = tile.ri.referenceCenter.y;
+        double centerZ = tile.ri.referenceCenter.z;
+
+        // Loop through all tile cells - triangle pairs
+        int startIndice = (density + 2) * 2 + 6; // skip firts skirt row and a couple degenerate cells
+        int endIndice = trianglesNum - startIndice; // ignore last skirt row and a couple degenerate cells
+        int k = -1;
+        for (int i = startIndice; i < endIndice; i += 2)
+        {
+            // Skip skirts and degenerate triangle cells - based on indice sequence.
+            k = k == density - 1 ? -4 : k + 1; // density x terrain cells interleaved with 4 skirt and degenerate cells.
+            if (k < 0)
+                continue;
+
+            // Get the four cell corners
+            int vIndex = 3 * indices[i];
+            Vec4 v0 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            vIndex = 3 * indices[i + 1];
+            Vec4 v1 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            vIndex = 3 * indices[i + 2];
+            Vec4 v2 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            vIndex = 3 * indices[i + 3];
+            Vec4 v3 = new Vec4(
+                    coords[vIndex++] + centerX,
+                    coords[vIndex++] + centerY,
+                    coords[vIndex] + centerZ);
+
+            Intersection[] inter;
+            // Test triangle 1 intersection
+            if ((inter = globe.intersect(new Triangle(v0, v1, v2), elevation)) != null)
+            {
+                list.add(inter[0]);
+                list.add(inter[1]);
+            }
+
+            // Test triangle 2 intersection
+            if ((inter = globe.intersect(new Triangle(v1, v2, v3), elevation)) != null)
+            {
+                list.add(inter[0]);
+                list.add(inter[1]);
+            }
+        }
+
+        int numHits = list.size();
+        if (numHits == 0)
+            return null;
+
+        hits = new Intersection[numHits];
+        list.toArray(hits);
+
+        return hits;
+    }
+
+    private Vec4 getSurfacePoint(RectTile tile, Angle latitude,
+			Angle longitude, double metersOffset)
+	{
+		Vec4 result = this.getSurfacePoint(tile, latitude, longitude);
+		if (metersOffset != 0 && result != null)
+			result = applyOffset(this.globe, result, metersOffset);
+
+		return result;
+	}
 
   private static Vec4 applyOffset(Globe paramGlobe, Vec4 paramVec4, double paramDouble)
   {
@@ -896,697 +1079,971 @@ private Intersection[] intersect(RectTile tile, Line line)
     return paramVec4;
   }
 
-  private Vec4 getSurfacePoint(RectTile paramRectTile, Angle paramAngle1, Angle paramAngle2)
-  {
-    if ((paramAngle1 == null) || (paramAngle2 == null))
-    {
-      String str = Logging.getMessage("nullValue.LatLonIsNull");
-      Logging.logger().severe(str);
-      throw new IllegalArgumentException(str);
-    }
-    if (!paramRectTile.sector.contains(paramAngle1, paramAngle2))
-      return null;
-    if (paramRectTile.ri == null)
-      return null;
-    double d1 = paramAngle1.getDegrees();
-    double d2 = paramAngle2.getDegrees();
-    double d3 = paramRectTile.sector.getMinLatitude().getDegrees();
-    double d4 = paramRectTile.sector.getMaxLatitude().getDegrees();
-    double d5 = paramRectTile.sector.getMinLongitude().getDegrees();
-    double d6 = paramRectTile.sector.getMaxLongitude().getDegrees();
-    double d7 = (d2 - d5) / (d6 - d5);
-    double d8 = (d1 - d3) / (d4 - d3);
-    int i = (int)(d8 * paramRectTile.density);
-    int j = (int)(d7 * paramRectTile.density);
-    double d9 = createPosition(j, d7, paramRectTile.ri.density);
-    double d10 = createPosition(i, d8, paramRectTile.ri.density);
-    Vec4 localVec4 = interpolate(i, j, d9, d10, paramRectTile.ri);
-    localVec4 = localVec4.add3(paramRectTile.ri.referenceCenter);
-    return localVec4;
-  }
+  private Vec4 getSurfacePoint(RectTile tile, Angle latitude, Angle longitude)
+	{
+		if (latitude == null || longitude == null)
+		{
+			String msg = Logging.getMessage("nullValue.LatLonIsNull");
+			Logging.logger().severe(msg);
+			throw new IllegalArgumentException(msg);
+		}
 
-  private static double createPosition(int paramInt1, double paramDouble, int paramInt2)
-  {
-    double d1 = paramInt1 / paramInt2;
-    double d2 = (paramInt1 + 1) / paramInt2;
-    return (paramDouble - d1) / (d2 - d1);
-  }
+		if (!tile.sector.contains(latitude, longitude))
+		{
+			// not on this geometry
+			return null;
+		}
 
-  private static Vec4 interpolate(int paramInt1, int paramInt2, double paramDouble1, double paramDouble2, RenderInfo paramRenderInfo)
-  {
-    paramInt1++;
-    paramInt2++;
-    int i = paramRenderInfo.density + 3;
-    int j = paramInt1 * i + paramInt2;
-    j *= 3;
-    int k = i * 3;
-    Vec4 localVec41 = new Vec4(paramRenderInfo.vertices.get(j), paramRenderInfo.vertices.get(j + 1), paramRenderInfo.vertices.get(j + 2));
-    Vec4 localVec42 = new Vec4(paramRenderInfo.vertices.get(j + 3), paramRenderInfo.vertices.get(j + 4), paramRenderInfo.vertices.get(j + 5));
-    j += k;
-    Vec4 localVec43 = new Vec4(paramRenderInfo.vertices.get(j), paramRenderInfo.vertices.get(j + 1), paramRenderInfo.vertices.get(j + 2));
-    Vec4 localVec44 = new Vec4(paramRenderInfo.vertices.get(j + 3), paramRenderInfo.vertices.get(j + 4), paramRenderInfo.vertices.get(j + 5));
-    return interpolate(localVec41, localVec42, localVec44, localVec43, paramDouble1, paramDouble2);
-  }
+		if (tile.ri == null)
+			return null;
 
-  private static Vec4 interpolate(Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, Vec4 paramVec44, double paramDouble1, double paramDouble2)
-  {
-    double d = paramDouble1 + paramDouble2;
-    if (d == 1.0D)
-      return new Vec4(paramVec44.x * paramDouble2 + paramVec42.x * paramDouble1, paramVec44.y * paramDouble2 + paramVec42.y * paramDouble1, paramVec44.z * paramDouble2 + paramVec42.z * paramDouble1);
-    if (d > 1.0D)
-    {
-      Vec4 localVec41 = paramVec44.subtract3(paramVec43).multiply3(1.0D - paramDouble1);
-      Vec4 localVec42 = paramVec42.subtract3(paramVec43).multiply3(1.0D - paramDouble2);
-      return paramVec43.add3(localVec41).add3(localVec42);
-    }
-    Vec4 localVec41 = paramVec42.subtract3(paramVec41).multiply3(paramDouble1);
-    Vec4 localVec42 = paramVec44.subtract3(paramVec41).multiply3(paramDouble2);
-    return paramVec41.add3(localVec41).add3(localVec42);
-  }
+		double lat = latitude.getDegrees();
+		double lon = longitude.getDegrees();
 
-  private static double[] baryCentricCoordsRequireInside(Vec4 paramVec4, Vec4[] paramArrayOfVec4)
-  {
-    double[] arrayOfDouble = new double[3];
-    double d1 = distanceFromLine(paramArrayOfVec4[0], paramArrayOfVec4[1], paramArrayOfVec4[2].subtract3(paramArrayOfVec4[1]));
-    double d2 = distanceFromLine(paramVec4, paramArrayOfVec4[1], paramArrayOfVec4[2].subtract3(paramArrayOfVec4[1]));
-    arrayOfDouble[0] = (d2 / d1);
-    if (Math.abs(arrayOfDouble[0]) < 0.0001D)
-      arrayOfDouble[0] = 0.0D;
-    else if (Math.abs(1.0D - arrayOfDouble[0]) < 0.0001D)
-      arrayOfDouble[0] = 1.0D;
-    if ((arrayOfDouble[0] < 0.0D) || (arrayOfDouble[0] > 1.0D))
-      return null;
-    d1 = distanceFromLine(paramArrayOfVec4[1], paramArrayOfVec4[0], paramArrayOfVec4[2].subtract3(paramArrayOfVec4[0]));
-    d2 = distanceFromLine(paramVec4, paramArrayOfVec4[0], paramArrayOfVec4[2].subtract3(paramArrayOfVec4[0]));
-    arrayOfDouble[1] = (d2 / d1);
-    if (Math.abs(arrayOfDouble[1]) < 0.0001D)
-      arrayOfDouble[1] = 0.0D;
-    else if (Math.abs(1.0D - arrayOfDouble[1]) < 0.0001D)
-      arrayOfDouble[1] = 1.0D;
-    if ((arrayOfDouble[1] < 0.0D) || (arrayOfDouble[1] > 1.0D))
-      return null;
-    arrayOfDouble[2] = (1.0D - arrayOfDouble[0] - arrayOfDouble[1]);
-    if (Math.abs(arrayOfDouble[2]) < 0.0001D)
-      arrayOfDouble[2] = 0.0D;
-    else if (Math.abs(1.0D - arrayOfDouble[2]) < 0.0001D)
-      arrayOfDouble[2] = 1.0D;
-    if (arrayOfDouble[2] < 0.0D)
-      return null;
-    return arrayOfDouble;
-  }
+		double bottom = tile.sector.getMinLatitude().getDegrees();
+		double top = tile.sector.getMaxLatitude().getDegrees();
+		double left = tile.sector.getMinLongitude().getDegrees();
+		double right = tile.sector.getMaxLongitude().getDegrees();
 
-  private static double distanceFromLine(Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43)
-  {
-    Vec4 localVec4 = paramVec41.subtract3(paramVec42);
-    double d1 = localVec4.dot3(localVec4);
-    double d2 = paramVec43.normalize3().dot3(localVec4);
-    d2 *= d2;
-    double d3 = d1 - d2;
-    if (d3 < 0.0D)
-      return 0.0D;
-    return Math.sqrt(d3);
-  }
+		double leftDecimal = (lon - left) / (right - left);
+		double bottomDecimal = (lat - bottom) / (top - bottom);
 
-  protected DoubleBuffer makeGeographicTexCoords(SectorGeometry paramSectorGeometry, SectorGeometry.GeographicTextureCoordinateComputer paramGeographicTextureCoordinateComputer)
-  {
-    if (paramSectorGeometry == null)
-    {
-      String localObject = Logging.getMessage("nullValue.SectorGeometryIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalArgumentException((String)localObject);
-    }
-    if (paramGeographicTextureCoordinateComputer == null)
-    {
-      String localObject = Logging.getMessage("nullValue.TextureCoordinateComputerIsNull");
-      Logging.logger().severe((String)localObject);
-      throw new IllegalArgumentException((String)localObject);
-    }
-    Object localObject = (RectTile)paramSectorGeometry;
-    int i = ((RectTile)localObject).density;
-    if (i < 1)
-      i = 1;
-    int j = (i + 3) * (i + 3);
-    DoubleBuffer localDoubleBuffer = BufferUtil.newDoubleBuffer(2 * j);
-    double d1 = ((RectTile)localObject).sector.getDeltaLatRadians() / i;
-    double d2 = ((RectTile)localObject).sector.getDeltaLonRadians() / i;
-    Angle localAngle1 = ((RectTile)localObject).sector.getMinLatitude();
-    Angle localAngle2 = ((RectTile)localObject).sector.getMaxLatitude();
-    Angle localAngle3 = ((RectTile)localObject).sector.getMinLongitude();
-    Angle localAngle4 = ((RectTile)localObject).sector.getMaxLongitude();
-    int k = 2 * (i + 3);
-    Angle localAngle5;
-    for (int m = 0; m < i; m++)
-    {
-      localAngle5 = Angle.fromRadians(localAngle1.radians + m * d1);
-      double[] arrayOfDouble = paramGeographicTextureCoordinateComputer.compute(localAngle5, localAngle3);
-      localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-      for (int i1 = 0; i1 < i; i1++)
-      {
-        Angle localAngle6 = Angle.fromRadians(localAngle3.radians + i1 * d2);
-        arrayOfDouble = paramGeographicTextureCoordinateComputer.compute(localAngle5, localAngle6);
-        localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-      }
-      arrayOfDouble = paramGeographicTextureCoordinateComputer.compute(localAngle5, localAngle4);
-      localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-      localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-    }
-    double[] arrayOfDouble = paramGeographicTextureCoordinateComputer.compute(localAngle2, localAngle3);
-    localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-    for (int m = 0; m < i; m++)
-    {
-      localAngle5 = Angle.fromRadians(localAngle3.radians + m * d2);
-      arrayOfDouble = paramGeographicTextureCoordinateComputer.compute(localAngle2, localAngle5);
-      localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-    }
-    arrayOfDouble = paramGeographicTextureCoordinateComputer.compute(localAngle2, localAngle4);
-    localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-    localDoubleBuffer.put(k++, arrayOfDouble[0]).put(k++, arrayOfDouble[1]);
-    int m = k - 2 * (i + 3);
-    for (int n = 0; n < i + 3; n++)
-    {
-      localDoubleBuffer.put(k++, localDoubleBuffer.get(m++));
-      localDoubleBuffer.put(k++, localDoubleBuffer.get(m++));
-    }
-    k = 0;
-    m = 2 * (i + 3);
-    for (int n = 0; n < i + 3; n++)
-    {
-      localDoubleBuffer.put(k++, localDoubleBuffer.get(m++));
-      localDoubleBuffer.put(k++, localDoubleBuffer.get(m++));
-    }
-    return (DoubleBuffer)localDoubleBuffer;
-  }
+		int row = (int) (bottomDecimal * (tile.density));
+		int column = (int) (leftDecimal * (tile.density));
 
-  private static DoubleBuffer getTextureCoordinates(int paramInt)
-  {
-    if (paramInt < 1)
-      paramInt = 1;
-    DoubleBuffer localDoubleBuffer = (DoubleBuffer)parameterizations.get(Integer.valueOf(paramInt));
-    if (localDoubleBuffer != null)
-      return localDoubleBuffer;
-    int i = (paramInt + 3) * (paramInt + 3);
-    localDoubleBuffer = BufferUtil.newDoubleBuffer(2 * i);
-    double d1 = 1.0D / paramInt;
-    int j = 2 * (paramInt + 3);
-    for (int k = 0; k < paramInt; k++)
-    {
-      double d3 = k * d1;
-      localDoubleBuffer.put(j++, 0.0D);
-      localDoubleBuffer.put(j++, d3);
-      for (int n = 0; n < paramInt; n++)
-      {
-        localDoubleBuffer.put(j++, n * d1);
-        localDoubleBuffer.put(j++, d3);
-      }
-      localDoubleBuffer.put(j++, 0.999999D);
-      localDoubleBuffer.put(j++, d3);
-      localDoubleBuffer.put(j++, 0.999999D);
-      localDoubleBuffer.put(j++, d3);
-    }
-    double d2 = 0.999999D;
-    localDoubleBuffer.put(j++, 0.0D);
-    localDoubleBuffer.put(j++, d2);
-    for (int m = 0; m < paramInt; m++)
-    {
-      localDoubleBuffer.put(j++, m * d1);
-      localDoubleBuffer.put(j++, d2);
-    }
-    localDoubleBuffer.put(j++, 0.999999D);
-    localDoubleBuffer.put(j++, d2);
-    localDoubleBuffer.put(j++, 0.999999D);
-    localDoubleBuffer.put(j++, d2);
-    int m = j - 2 * (paramInt + 3);
-    for (int n = 0; n < paramInt + 3; n++)
-    {
-      localDoubleBuffer.put(j++, localDoubleBuffer.get(m++));
-      localDoubleBuffer.put(j++, localDoubleBuffer.get(m++));
-    }
-    j = 0;
-    m = 2 * (paramInt + 3);
-    for (int n = 0; n < paramInt + 3; n++)
-    {
-      localDoubleBuffer.put(j++, localDoubleBuffer.get(m++));
-      localDoubleBuffer.put(j++, localDoubleBuffer.get(m++));
-    }
-    parameterizations.put(Integer.valueOf(paramInt), localDoubleBuffer);
-    return localDoubleBuffer;
-  }
+		double l = createPosition(column, leftDecimal, tile.ri.density);
+		double h = createPosition(row, bottomDecimal, tile.ri.density);
 
-  protected static IntBuffer getIndices(int paramInt)
-  {
-    if (paramInt < 1)
-      paramInt = 1;
-    IntBuffer localIntBuffer = (IntBuffer)indexLists.get(Integer.valueOf(paramInt));
-    if (localIntBuffer != null)
-      return localIntBuffer;
-    int i = paramInt + 2;
-    int j = 2 * i * i + 4 * i - 2;
-    localIntBuffer = BufferUtil.newIntBuffer(j);
-    int k = 0;
-    for (int m = 0; m < i; m++)
-    {
-      localIntBuffer.put(k);
-      if (m > 0)
-      {
-        k++;
-        localIntBuffer.put(k);
-        localIntBuffer.put(k);
-      }
-      int n;
-      if (m % 2 == 0)
-      {
-        k++;
-        localIntBuffer.put(k);
-        for (n = 0; n < i; n++)
+		Vec4 result = interpolate(row, column, l, h, tile.ri);
+		result = result.add3(tile.ri.referenceCenter);
+
+		return result;
+	}
+
+/**
+ * Computes from a column (or row) number, and a given offset ranged [0,1]
+ * corresponding to the distance along the edge of this sector, where
+ * between this column and the next column the corresponding position will
+ * fall, in the range [0,1].
+ *
+ * @param start
+ *            the number of the column or row to the left, below or on this
+ *            position
+ * @param decimal
+ *            the distance from the left or bottom of the current sector
+ *            that this position falls
+ * @param density
+ *            the number of intervals along the sector's side
+ * @return a decimal ranged [0,1] representing the position between two
+ *         columns or rows, rather than between two edges of the sector
+ */
+private static double createPosition(int start, double decimal, int density)
+{
+        double l = ((double) start) / (double) density;
+        double r = ((double) (start + 1)) / (double) density;
+
+        return (decimal - l) / (r - l);
+}
+
+/**
+ * Calculates a <code>Point</code> that sits at <code>xDec</code> offset
+ * from <code>column</code> to <code>column +
+ * 1</code> and at <code>yDec</code> offset from <code>row</code> to
+ * <code>row + 1</code>. Accounts for the diagonals.
+ *
+ * @param row
+ *            represents the row which corresponds to a <code>yDec</code>
+ *            value of 0
+ * @param column
+ *            represents the column which corresponds to an
+ *            <code>xDec</code> value of 0
+ * @param xDec
+ *            constrained to [0,1]
+ * @param yDec
+ *            constrained to [0,1]
+ * @param ri
+ *            the render info holding the vertices, etc.
+ * @return a <code>Point</code> geometrically within or on the boundary of
+ *         the quadrilateral whose bottom left corner is indexed by (
+ *         <code>row</code>, <code>column</code>)
+ */
+private static Vec4 interpolate(int row, int column, double xDec,
+                double yDec, RenderInfo ri)
+{
+        row++;
+        column++;
+
+        int numVerticesPerEdge = ri.density + 3;
+
+        int bottomLeft = row * numVerticesPerEdge + column;
+
+        bottomLeft *= 3;
+
+        int numVertsTimesThree = numVerticesPerEdge * 3;
+
+        Vec4 bL = new Vec4(ri.vertices.get(bottomLeft), ri.vertices
+                        .get(bottomLeft + 1), ri.vertices.get(bottomLeft + 2));
+        Vec4 bR = new Vec4(ri.vertices.get(bottomLeft + 3), ri.vertices
+                        .get(bottomLeft + 4), ri.vertices.get(bottomLeft + 5));
+
+        bottomLeft += numVertsTimesThree;
+
+        Vec4 tL = new Vec4(ri.vertices.get(bottomLeft), ri.vertices
+                        .get(bottomLeft + 1), ri.vertices.get(bottomLeft + 2));
+        Vec4 tR = new Vec4(ri.vertices.get(bottomLeft + 3), ri.vertices
+                        .get(bottomLeft + 4), ri.vertices.get(bottomLeft + 5));
+
+        return interpolate(bL, bR, tR, tL, xDec, yDec);
+}
+
+/**
+ * Calculates the point at (xDec, yDec) in the two triangles defined by {bL,
+ * bR, tL} and {bR, tR, tL}. If thought of as a quadrilateral, the diagonal
+ * runs from tL to bR. Of course, this isn't a quad, it's two triangles.
+ *
+ * @param bL
+ *            the bottom left corner
+ * @param bR
+ *            the bottom right corner
+ * @param tR
+ *            the top right corner
+ * @param tL
+ *            the top left corner
+ * @param xDec
+ *            how far along, [0,1] 0 = left edge, 1 = right edge
+ * @param yDec
+ *            how far along, [0,1] 0 = bottom edge, 1 = top edge
+ * @return the point xDec, yDec in the co-ordinate system defined by bL, bR,
+ *         tR, tL
+ */
+private static Vec4 interpolate(Vec4 bL, Vec4 bR, Vec4 tR, Vec4 tL,
+                double xDec, double yDec)
+{
+        double pos = xDec + yDec;
+        if (pos == 1)
         {
-          k += i;
-          localIntBuffer.put(k);
-          k++;
-          localIntBuffer.put(k);
+                // on the diagonal - what's more, we don't need to do any "oneMinusT" calculation
+                return new Vec4(tL.x * yDec + bR.x * xDec, tL.y * yDec + bR.y
+                                * xDec, tL.z * yDec + bR.z * xDec);
         }
-      }
-      else
-      {
-        k--;
-        localIntBuffer.put(k);
-        for (n = 0; n < i; n++)
+        else if (pos > 1)
         {
-          k -= i;
-          localIntBuffer.put(k);
-          k--;
-          localIntBuffer.put(k);
+                // in the "top right" half
+
+                // vectors pointing from top right towards the point we want (can be thought of as "negative" vectors)
+                Vec4 horizontalVector = (tL.subtract3(tR)).multiply3(1 - xDec);
+                Vec4 verticalVector = (bR.subtract3(tR)).multiply3(1 - yDec);
+
+                return tR.add3(horizontalVector).add3(verticalVector);
         }
-      }
-    }
-    indexLists.put(Integer.valueOf(paramInt), localIntBuffer);
-    return localIntBuffer;
-  }
-
-  protected static DoubleBuffer getNormalsQuick(int paramInt, DoubleBuffer paramDoubleBuffer, Vec4 paramVec4)
-  {
-    int i = paramInt + 3;
-    int j = i * i;
-    DoubleBuffer localDoubleBuffer = BufferUtil.newDoubleBuffer(j * 3);
-    int m;
-    int n;
-    for (int k = 1; k < i - 1; k++)
-      for (m = 1; m < i - 1; m++)
-      {
-        n = k * i + m;
-        int i1 = k * i + (m - 1);
-        int i2 = k * i + (m + 1);
-        int i3 = (k - 1) * i + m;
-        int i4 = (k + 1) * i + m;
-        Vec4 localVec41 = getVec4(n, paramDoubleBuffer, paramVec4);
-        Vec4 localVec42 = getVec4(i1, paramDoubleBuffer, paramVec4);
-        Vec4 localVec43 = getVec4(i2, paramDoubleBuffer, paramVec4);
-        Vec4 localVec44 = getVec4(i3, paramDoubleBuffer, paramVec4);
-        Vec4 localVec45 = getVec4(i4, paramDoubleBuffer, paramVec4);
-        Vec4 localVec46 = localVec41.subtract3(localVec42).normalize3().cross3(localVec41.subtract3(localVec44).normalize3());
-        Vec4 localVec47 = localVec41.subtract3(localVec43).normalize3().cross3(localVec41.subtract3(localVec45).normalize3());
-        Vec4 localVec48 = localVec46.add3(localVec47).normalize3();
-        localDoubleBuffer.put(n * 3, localVec48.x).put(n * 3 + 1, localVec48.y).put(n * 3 + 2, localVec48.z);
-      }
-    for (int k = 1; k < i - 1; k++)
-    {
-      m = k;
-      n = i + k;
-      copyNormalInBuffer(n, m, localDoubleBuffer);
-      m = i * (i - 1) + k;
-      n = i * (i - 2) + k;
-      copyNormalInBuffer(n, m, localDoubleBuffer);
-    }
-    for (int k = 0; k < i; k++)
-    {
-      m = k * i;
-      n = k * i + 1;
-      copyNormalInBuffer(n, m, localDoubleBuffer);
-      m = k * i + (i - 1);
-      n = k * i + (i - 2);
-      copyNormalInBuffer(n, m, localDoubleBuffer);
-    }
-    return localDoubleBuffer;
-  }
-
-  private static Vec4 getVec4(int paramInt, DoubleBuffer paramDoubleBuffer, Vec4 paramVec4)
-  {
-    return new Vec4(paramDoubleBuffer.get(paramInt * 3) + paramVec4.x, paramDoubleBuffer.get(paramInt * 3 + 1) + paramVec4.y, paramDoubleBuffer.get(paramInt * 3 + 2) + paramVec4.z);
-  }
-
-  private static void copyNormalInBuffer(int paramInt1, int paramInt2, DoubleBuffer paramDoubleBuffer)
-  {
-    paramDoubleBuffer.put(paramInt2 * 3, paramDoubleBuffer.get(paramInt1 * 3));
-    paramDoubleBuffer.put(paramInt2 * 3 + 1, paramDoubleBuffer.get(paramInt1 * 3 + 1));
-    paramDoubleBuffer.put(paramInt2 * 3 + 2, paramDoubleBuffer.get(paramInt1 * 3 + 2));
-  }
-
-  protected static DoubleBuffer getNormals(int paramInt, DoubleBuffer paramDoubleBuffer, IntBuffer paramIntBuffer, Vec4 paramVec4)
-  {
-    int i = paramInt + 3;
-    int j = i * i;
-    int k = paramIntBuffer.limit() - 2;
-    double d1 = paramVec4.x;
-    double d2 = paramVec4.y;
-    double d3 = paramVec4.z;
-    DoubleBuffer localDoubleBuffer = BufferUtil.newDoubleBuffer(j * 3);
-    int[] arrayOfInt = new int[j];
-    Vec4[] arrayOfVec4 = new Vec4[j];
-    for (int m = 0; m < j; m++)
-      arrayOfVec4[m] = new Vec4(0.0D);
-    int n;
-    for (int m = 0; m < k; m++)
-    {
-      n = paramIntBuffer.get(m);
-      int i1 = paramIntBuffer.get(m + 1);
-      int i2 = paramIntBuffer.get(m + 2);
-      Vec4 localVec41 = new Vec4(paramDoubleBuffer.get(n * 3) + d1, paramDoubleBuffer.get(n * 3 + 1) + d2, paramDoubleBuffer.get(n * 3 + 2) + d3);
-      Vec4 localVec42 = new Vec4(paramDoubleBuffer.get(i1 * 3) + d1, paramDoubleBuffer.get(i1 * 3 + 1) + d2, paramDoubleBuffer.get(i1 * 3 + 2) + d3);
-      Vec4 localVec43 = new Vec4(paramDoubleBuffer.get(i2 * 3) + d1, paramDoubleBuffer.get(i2 * 3 + 1) + d2, paramDoubleBuffer.get(i2 * 3 + 2) + d3);
-      Vec4 localVec44 = localVec42.subtract3(localVec41);
-      Vec4 localVec45;
-      if (m % 2 == 0)
-        localVec45 = localVec43.subtract3(localVec41);
-      else
-        localVec45 = localVec41.subtract3(localVec43);
-      Vec4 localVec46 = localVec44.cross3(localVec45).normalize3();
-      if (localVec46.getLength3() <= 0.0D)
-        continue;
-      arrayOfVec4[n] = arrayOfVec4[n].add3(localVec46);
-      arrayOfVec4[i1] = arrayOfVec4[i1].add3(localVec46);
-      arrayOfVec4[i2] = arrayOfVec4[i2].add3(localVec46);
-      arrayOfInt[n] += 1;
-      arrayOfInt[i1] += 1;
-      arrayOfInt[i2] += 1;
-    }
-    for (int m = 0; m < j; m++)
-    {
-      if (arrayOfInt[m] > 0)
-        arrayOfVec4[m] = arrayOfVec4[m].divide3(arrayOfInt[m]).normalize3();
-      n = m * 3;
-      localDoubleBuffer.put(n++, arrayOfVec4[m].x).put(n++, arrayOfVec4[m].y).put(n, arrayOfVec4[m].z);
-    }
-    return localDoubleBuffer;
-  }
-
-  private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile paramRectTile, Plane[] paramArrayOfPlane)
-  {
-    paramRectTile.ri.vertices.rewind();
-    paramRectTile.ri.indices.rewind();
-    Vec4 localVec4 = paramRectTile.ri.referenceCenter;
-    if (localVec4 == null)
-      localVec4 = new Vec4(0.0D);
-    int i = paramRectTile.ri.indices.capacity() - 2;
-    int[] arrayOfInt = new int[3];
-    double[] arrayOfDouble = new double[3];
-    SectorGeometry.ExtractedShapeDescription localExtractedShapeDescription = null;
-    for (int j = 0; j < i; j++)
-    {
-      paramRectTile.ri.indices.position(j);
-      paramRectTile.ri.indices.get(arrayOfInt);
-      if ((arrayOfInt[0] == arrayOfInt[1]) || (arrayOfInt[0] == arrayOfInt[2]) || (arrayOfInt[1] == arrayOfInt[2]))
-        continue;
-      Vec4[] arrayOfVec4 = new Vec4[3];
-      for (int k = 0; k < 3; k++)
-      {
-        paramRectTile.ri.vertices.position(3 * arrayOfInt[k]);
-        paramRectTile.ri.vertices.get(arrayOfDouble);
-        arrayOfVec4[k] = new Vec4(arrayOfDouble[0] + localVec4.getX(), arrayOfDouble[1] + localVec4.getY(), arrayOfDouble[2] + localVec4.getZ(), 1.0D);
-      }
-      localExtractedShapeDescription = addClippedPolygon(arrayOfVec4, paramArrayOfPlane, localExtractedShapeDescription);
-    }
-    return localExtractedShapeDescription;
-  }
-
-  private SectorGeometry.ExtractedShapeDescription addClippedPolygon(Vec4[] paramArrayOfVec4, Plane[] paramArrayOfPlane, SectorGeometry.ExtractedShapeDescription paramExtractedShapeDescription)
-  {
-    if (isSkirt(paramArrayOfVec4))
-      return paramExtractedShapeDescription;
-    Vec4[] arrayOfVec4 = new Vec4[3];
-    System.arraycopy(paramArrayOfVec4, 0, arrayOfVec4, 0, 3);
-    for (Plane localPlane : paramArrayOfPlane)
-    {
-      arrayOfVec4 = doSHPass(localPlane, arrayOfVec4);
-      if (arrayOfVec4 == null)
-        return paramExtractedShapeDescription;
-    }
-    if (paramExtractedShapeDescription == null)
-      paramExtractedShapeDescription = new SectorGeometry.ExtractedShapeDescription(new ArrayList(), new ArrayList());
-    paramExtractedShapeDescription.interiorPolys.add(arrayOfVec4);
-    addBoundaryEdges(arrayOfVec4, paramArrayOfVec4, paramExtractedShapeDescription.shapeOutline);
-    return paramExtractedShapeDescription;
-  }
-
-  private boolean isSkirt(Vec4[] paramArrayOfVec4)
-  {
-    Vec4 localVec41 = this.globe.computeSurfaceNormalAtPoint(paramArrayOfVec4[0]);
-    double d = Math.max(Math.abs(paramArrayOfVec4[0].x), Math.abs(paramArrayOfVec4[0].y));
-    d = Math.max(d, Math.abs(paramArrayOfVec4[0].z));
-    Vec4 localVec42 = paramArrayOfVec4[0].divide3(d);
-    Vec4 localVec43 = paramArrayOfVec4[1].divide3(d).subtract3(localVec42);
-    Vec4 localVec44 = paramArrayOfVec4[(paramArrayOfVec4.length - 1)].divide3(d).subtract3(localVec42);
-    Vec4 localVec45 = localVec43.cross3(localVec44).normalize3();
-    return Math.abs(localVec45.dot3(localVec41)) < 0.0001D;
-  }
-
-  private Vec4[] doSHPass(Plane paramPlane, Vec4[] paramArrayOfVec4)
-  {
-    ArrayList localArrayList = new ArrayList();
-    Object localObject = paramArrayOfVec4[0];
-    int i = paramPlane.dot((Vec4)localObject) <= 0.0D ? 1 : 0;
-    for (int j = 1; j <= paramArrayOfVec4.length; j++)
-    {
-      if (i != 0)
-        localArrayList.add(localObject);
-      Vec4 localVec4 = paramArrayOfVec4[(j % paramArrayOfVec4.length)];
-      int k = paramPlane.dot(localVec4) <= 0.0D ? 1 : 0;
-      if (i != k)
-      {
-        Vec4[] arrayOfVec42;
-        if (i != 0)
-          arrayOfVec42 = paramPlane.clip((Vec4)localObject, localVec4);
         else
-          arrayOfVec42 = paramPlane.clip(localVec4, (Vec4)localObject);
-        localArrayList.add(arrayOfVec42[0]);
-      }
-      localObject = localVec4;
-      i = k;
-    }
-    if (localArrayList.size() == 0)
-      return null;
-    Vec4[] arrayOfVec41 = new Vec4[localArrayList.size()];
-    return (Vec4[])localArrayList.toArray(arrayOfVec41);
-  }
+        {
+                // pos < 1 - in the "bottom left" half
 
-  private void addBoundaryEdges(Vec4[] paramArrayOfVec41, Vec4[] paramArrayOfVec42, ArrayList<SectorGeometry.BoundaryEdge> paramArrayList)
-  {
-    for (int i = 0; i < paramArrayOfVec41.length; i++)
-    {
-      int j = (i + 1) % paramArrayOfVec41.length;
-      if (edgeOnTriangle(paramArrayOfVec41[i], paramArrayOfVec41[j], paramArrayOfVec42))
-        continue;
-      paramArrayList.add(new SectorGeometry.BoundaryEdge(paramArrayOfVec41, i, j));
-    }
-  }
+                // vectors pointing from the bottom left towards the point we want
+                Vec4 horizontalVector = (bR.subtract3(bL)).multiply3(xDec);
+                Vec4 verticalVector = (tL.subtract3(bL)).multiply3(yDec);
 
-  private boolean edgeOnTriangle(Vec4 paramVec41, Vec4 paramVec42, Vec4[] paramArrayOfVec4)
-  {
-    double[] arrayOfDouble1 = baryCentricCoordsRequireInside(paramVec41, paramArrayOfVec4);
-    double[] arrayOfDouble2 = baryCentricCoordsRequireInside(paramVec42, paramArrayOfVec4);
-    if ((arrayOfDouble1 == null) || (arrayOfDouble2 == null))
-      return true;
-    for (int i = 0; i < 3; i++)
-      if ((arrayOfDouble1[i] < 0.0001D) && (arrayOfDouble2[i] < 0.0001D))
-        return true;
-    return false;
-  }
+                return bL.add3(horizontalVector).add3(verticalVector);
+        }
+}
 
-  private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile paramRectTile, Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, double paramDouble1, double paramDouble2)
-  {
-    paramRectTile.ri.vertices.rewind();
-    paramRectTile.ri.indices.rewind();
-    Vec4 localVec4 = paramRectTile.ri.referenceCenter;
-    if (localVec4 == null)
-      localVec4 = new Vec4(0.0D);
-    int i = paramRectTile.ri.indices.capacity() - 2;
-    int[] arrayOfInt = new int[3];
-    double[] arrayOfDouble = new double[3];
-    SectorGeometry.ExtractedShapeDescription localExtractedShapeDescription = null;
-    for (int j = 0; j < i; j++)
+  private static double[] baryCentricCoordsRequireInside(Vec4 pnt, Vec4[] V)
     {
-      paramRectTile.ri.indices.position(j);
-      paramRectTile.ri.indices.get(arrayOfInt);
-      if ((arrayOfInt[0] == arrayOfInt[1]) || (arrayOfInt[0] == arrayOfInt[2]) || (arrayOfInt[1] == arrayOfInt[2]))
-        continue;
-      Vec4[] arrayOfVec4 = new Vec4[3];
-      for (int k = 0; k < 3; k++)
-      {
-        paramRectTile.ri.vertices.position(3 * arrayOfInt[k]);
-        paramRectTile.ri.vertices.get(arrayOfDouble);
-        arrayOfVec4[k] = new Vec4(arrayOfDouble[0] + localVec4.getX(), arrayOfDouble[1] + localVec4.getY(), arrayOfDouble[2] + localVec4.getZ(), 1.0D);
-      }
-      localExtractedShapeDescription = addClippedPolygon(arrayOfVec4, paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2, localExtractedShapeDescription);
-    }
-    return localExtractedShapeDescription;
-  }
+        // if pnt is in the interior of the triangle determined by V, return its
+        // barycentric coordinates with respect to V. Otherwise return null.
 
-  private SectorGeometry.ExtractedShapeDescription addClippedPolygon(Vec4[] paramArrayOfVec4, Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, double paramDouble1, double paramDouble2, SectorGeometry.ExtractedShapeDescription paramExtractedShapeDescription)
-  {
-    if (isSkirt(paramArrayOfVec4))
-      return paramExtractedShapeDescription;
-    int i = 0;
-    int j = 0;
-    int k = -1;
-    int m = -1;
-    for (Vec4 localObject2 : paramArrayOfVec4)
-    {
-      Vec4 localVec42 = localObject2.subtract3(paramVec41);
-      double d1 = localVec42.dot3(paramVec42);
-      double d2 = localVec42.dot3(paramVec43);
-      double d3 = d1 * d1 / (paramDouble1 * paramDouble1) + d2 * d2 / (paramDouble2 * paramDouble2) - 1.0D;
-      if (d3 <= 0.0D)
-      {
-        k = i++;
-        j++;
-      }
-      else
-      {
-        m = i++;
-      }
+        // b0:
+        final double tol = 1.0e-4;
+        double[] b0b1b2 = new double[3];
+        double triangleHeight  =
+            distanceFromLine(V[0],V[1],V[2].subtract3(V[1]));
+        double heightFromPoint =
+            distanceFromLine(pnt,V[1],V[2].subtract3(V[1]));
+        b0b1b2[0] = heightFromPoint/triangleHeight;
+        if (Math.abs(b0b1b2[0]) < tol) b0b1b2[0] = 0.0;
+        else if (Math.abs(1.0-b0b1b2[0]) < tol) b0b1b2[0] = 1.0;
+        if (b0b1b2[0] < 0.0 || b0b1b2[0] > 1.0)
+            return null;
+
+        // b1:
+        triangleHeight  = distanceFromLine(V[1],V[0],V[2].subtract3(V[0]));
+        heightFromPoint = distanceFromLine(pnt,V[0],V[2].subtract3(V[0]));
+        b0b1b2[1] = heightFromPoint/triangleHeight;
+        if (Math.abs(b0b1b2[1]) < tol) b0b1b2[1] = 0.0;
+        else if (Math.abs(1.0-b0b1b2[1]) < tol) b0b1b2[1] = 1.0;
+        if (b0b1b2[1] < 0.0 || b0b1b2[1] > 1.0)
+            return null;
+
+        // b2:
+        b0b1b2[2] = 1.0 - b0b1b2[0] - b0b1b2[1];
+        if (Math.abs(b0b1b2[2]) < tol) b0b1b2[2] = 0.0;
+        else if (Math.abs(1.0-b0b1b2[2]) < tol) b0b1b2[2] = 1.0;
+        if (b0b1b2[2] < 0.0)
+            return null;
+        return b0b1b2;
     }
-    BoundaryEdge Boundary = new SectorGeometry.BoundaryEdge(null, -1, -1);
-    Vec4 localVec41;
-    switch (j)
+
+private static double distanceFromLine(Vec4 pnt, Vec4 P, Vec4 u)
     {
-    case 0:
-      paramArrayOfVec4 = checkForEdgeCylinderIntersections(paramArrayOfVec4, paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2);
-      break;
-    case 1:
-      if (k != 0)
-      {
-        localVec41 = paramArrayOfVec4[k];
-        paramArrayOfVec4[k] = paramArrayOfVec4[0];
-        paramArrayOfVec4[0] = localVec41;
-      }
-      paramArrayOfVec4 = computeTrimmedPoly(paramArrayOfVec4, paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2, j, (SectorGeometry.BoundaryEdge)Boundary);
-      break;
-    case 2:
-      if (m != 0)
-      {
-        localVec41 = paramArrayOfVec4[m];
-        paramArrayOfVec4[m] = paramArrayOfVec4[0];
-        paramArrayOfVec4[0] = localVec41;
-      }
-      paramArrayOfVec4 = computeTrimmedPoly(paramArrayOfVec4, paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2, j, (SectorGeometry.BoundaryEdge)Boundary);
-      break;
-    case 3:
+        // Return distance from pnt to line(P,u)
+        // Pythagorean theorem approach: c^2 = a^2 + b^2. The
+        // The square of the distance we seek is b^2:
+        Vec4 toPoint = pnt.subtract3(P);
+        double cSquared = toPoint.dot3(toPoint);
+        double aSquared = u.normalize3().dot3(toPoint);
+        aSquared *= aSquared;
+        double distSquared = cSquared - aSquared;
+        if (distSquared < 0.0)
+            // must be a tiny number that really ought to be 0.0
+            return 0.0;
+        return Math.sqrt(distSquared);
     }
-    if (paramArrayOfVec4 == null)
-      return paramExtractedShapeDescription;
-    if (paramExtractedShapeDescription == null)
-      paramExtractedShapeDescription = new SectorGeometry.ExtractedShapeDescription(new ArrayList(100), new ArrayList(50));
-    paramExtractedShapeDescription.interiorPolys.add(paramArrayOfVec4);
-    if (((SectorGeometry.BoundaryEdge)Boundary).vertices != null)
-      paramExtractedShapeDescription.shapeOutline.add(Boundary);
-    return (SectorGeometry.ExtractedShapeDescription)paramExtractedShapeDescription;
-  }
+
+  protected DoubleBuffer makeGeographicTexCoords(SectorGeometry sg,
+        SectorGeometry.GeographicTextureCoordinateComputer computer)
+    {
+        if (sg == null)
+        {
+            String msg = Logging.getMessage("nullValue.SectorGeometryIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
+
+        if (computer == null)
+        {
+            String msg = Logging.getMessage("nullValue.TextureCoordinateComputerIsNull");
+            Logging.logger().severe(msg);
+            throw new IllegalArgumentException(msg);
+        }
+
+        RectTile rt = (RectTile) sg;
+
+        int density = rt.density;
+        if (density < 1)
+            density = 1;
+
+        int coordCount = (density + 3) * (density + 3);
+        DoubleBuffer p = BufferUtil.newDoubleBuffer(2 * coordCount);
+
+        double deltaLat = rt.sector.getDeltaLatRadians() / density;
+        double deltaLon = rt.sector.getDeltaLonRadians() / density;
+        Angle minLat = rt.sector.getMinLatitude();
+        Angle maxLat = rt.sector.getMaxLatitude();
+        Angle minLon = rt.sector.getMinLongitude();
+        Angle maxLon = rt.sector.getMaxLongitude();
+
+        double[] uv; // for return values from computer
+
+        int k = 2 * (density + 3);
+        for (int j = 0; j < density; j++)
+        {
+            Angle lat = Angle.fromRadians(minLat.radians + j * deltaLat);
+
+            // skirt column; duplicate first column
+            uv = computer.compute(lat, minLon);
+            p.put(k++, uv[0]).put(k++, uv[1]);
+
+            // interior columns
+            for (int i = 0; i < density; i++)
+            {
+                Angle lon = Angle.fromRadians(minLon.radians + i * deltaLon);
+                uv = computer.compute(lat, lon);
+                p.put(k++, uv[0]).put(k++, uv[1]);
+            }
+
+            // last interior column; force u to 1.
+            uv = computer.compute(lat, maxLon);
+            p.put(k++, uv[0]).put(k++, uv[1]);
+
+            // skirt column; duplicate previous column
+            p.put(k++, uv[0]).put(k++, uv[1]);
+        }
+
+        // Last interior row
+        uv = computer.compute(maxLat, minLon); // skirt column
+        p.put(k++, uv[0]).put(k++, uv[1]);
+
+        for (int i = 0; i < density; i++)
+        {
+            Angle lon = Angle.fromRadians(minLon.radians + i * deltaLon); // u
+            uv = computer.compute(maxLat, lon);
+            p.put(k++, uv[0]).put(k++, uv[1]);
+        }
+
+        uv = computer.compute(maxLat, maxLon); // last interior column
+        p.put(k++, uv[0]).put(k++, uv[1]);
+        p.put(k++, uv[0]).put(k++, uv[1]); // skirt column
+
+        // last skirt row
+        int kk = k - 2 * (density + 3);
+        for (int i = 0; i < density + 3; i++)
+        {
+            p.put(k++, p.get(kk++));
+            p.put(k++, p.get(kk++));
+        }
+
+        // first skirt row
+        k = 0;
+        kk = 2 * (density + 3);
+        for (int i = 0; i < density + 3; i++)
+        {
+            p.put(k++, p.get(kk++));
+            p.put(k++, p.get(kk++));
+        }
+
+        return p;
+    }
+
+  private static DoubleBuffer getTextureCoordinates(int density)
+	{
+		if (density < 1)
+			density = 1;
+
+		// Approximate 1 to avoid shearing off of right and top skirts in SurfaceTileRenderer.
+		// TODO: dig into this more: why are the skirts being sheared off?
+		final double one = 0.999999;
+
+		DoubleBuffer p = parameterizations.get(density);
+		if (p != null)
+			return p;
+
+		int coordCount = (density + 3) * (density + 3);
+		p = BufferUtil.newDoubleBuffer(2 * coordCount);
+		double delta = 1d / density;
+		int k = 2 * (density + 3);
+		for (int j = 0; j < density; j++)
+		{
+			double v = j * delta;
+
+			// skirt column; duplicate first column
+			p.put(k++, 0d);
+			p.put(k++, v);
+
+			// interior columns
+			for (int i = 0; i < density; i++)
+			{
+				p.put(k++, i * delta); // u
+				p.put(k++, v);
+			}
+
+			// last interior column; force u to 1.
+			p.put(k++, one);//1d);
+			p.put(k++, v);
+
+			// skirt column; duplicate previous column
+			p.put(k++, one);//1d);
+			p.put(k++, v);
+		}
+
+		// Last interior row
+		//noinspection UnnecessaryLocalVariable
+		double v = one;//1d;
+		p.put(k++, 0d); // skirt column
+		p.put(k++, v);
+
+		for (int i = 0; i < density; i++)
+		{
+			p.put(k++, i * delta); // u
+			p.put(k++, v);
+		}
+		p.put(k++, one);//1d); // last interior column
+		p.put(k++, v);
+
+		p.put(k++, one);//1d); // skirt column
+		p.put(k++, v);
+
+		// last skirt row
+		int kk = k - 2 * (density + 3);
+		for (int i = 0; i < density + 3; i++)
+		{
+			p.put(k++, p.get(kk++));
+			p.put(k++, p.get(kk++));
+		}
+
+		// first skirt row
+		k = 0;
+		kk = 2 * (density + 3);
+		for (int i = 0; i < density + 3; i++)
+		{
+			p.put(k++, p.get(kk++));
+			p.put(k++, p.get(kk++));
+		}
+
+		parameterizations.put(density, p);
+
+		return p;
+	}
+
+  protected static IntBuffer getIndices(int density)
+{
+        if (density < 1)
+                density = 1;
+
+        // return a pre-computed buffer if possible.
+        java.nio.IntBuffer buffer = indexLists.get(density);
+        if (buffer != null)
+                return buffer;
+
+        int sideSize = density + 2;
+
+        int indexCount = 2 * sideSize * sideSize + 4 * sideSize - 2;
+        buffer = BufferUtil.newIntBuffer(indexCount);
+        int k = 0;
+        for (int i = 0; i < sideSize; i++)
+        {
+                buffer.put(k);
+                if (i > 0)
+                {
+                        buffer.put(++k);
+                        buffer.put(k);
+                }
+
+                if (i % 2 == 0) // even
+                {
+                        buffer.put(++k);
+                        for (int j = 0; j < sideSize; j++)
+                        {
+                                k += sideSize;
+                                buffer.put(k);
+                                buffer.put(++k);
+                        }
+                }
+                else
+                // odd
+                {
+                        buffer.put(--k);
+                        for (int j = 0; j < sideSize; j++)
+                        {
+                                k -= sideSize;
+                                buffer.put(k);
+                                buffer.put(--k);
+                        }
+                }
+        }
+
+        indexLists.put(density, buffer);
+
+        return buffer;
+}
+
+
+//calculates normals quickly, but uses 4 surrounding vertices
+//instead of average of connected faces
+protected static DoubleBuffer getNormalsQuick(int density,
+                DoubleBuffer vertices, Vec4 referenceCenter)
+{
+        int side = density + 3;
+        int numVertices = side * side;
+        java.nio.DoubleBuffer normals = BufferUtil
+                        .newDoubleBuffer(numVertices * 3);
+        Vec4 p0, p1, p2, p3, p4;
+
+        //don't calculate skirt normals yet
+        for (int j = 1; j < side - 1; j++)
+        {
+                for (int i = 1; i < side - 1; i++)
+                {
+                        int index0 = j * side + i;
+                        int index1 = j * side + (i - 1);
+                        int index2 = j * side + (i + 1);
+                        int index3 = (j - 1) * side + i;
+                        int index4 = (j + 1) * side + i;
+                        p0 = getVec4(index0, vertices, referenceCenter);
+                        p1 = getVec4(index1, vertices, referenceCenter);
+                        p2 = getVec4(index2, vertices, referenceCenter);
+                        p3 = getVec4(index3, vertices, referenceCenter);
+                        p4 = getVec4(index4, vertices, referenceCenter);
+
+                        Vec4 n1 = p0.subtract3(p1).normalize3().cross3(
+                                        p0.subtract3(p3).normalize3());
+                        Vec4 n2 = p0.subtract3(p2).normalize3().cross3(
+                                        p0.subtract3(p4).normalize3());
+                        Vec4 normal = n1.add3(n2).normalize3();
+
+                        normals.put(index0 * 3, normal.x).put(index0 * 3 + 1, normal.y)
+                                        .put(index0 * 3 + 2, normal.z);
+                }
+        }
+
+        //copy skirt normals from neighbours
+        for (int i = 1; i < side - 1; i++)
+        {
+                int di = i;
+                int si = side + i;
+                copyNormalInBuffer(si, di, normals);
+
+                di = side * (side - 1) + i;
+                si = side * (side - 2) + i;
+                copyNormalInBuffer(si, di, normals);
+        }
+        for (int i = 0; i < side; i++)
+        {
+                int di = i * side;
+                int si = i * side + 1;
+                copyNormalInBuffer(si, di, normals);
+
+                di = i * side + (side - 1);
+                si = i * side + (side - 2);
+                copyNormalInBuffer(si, di, normals);
+        }
+
+        return normals;
+}
+        
+	private static Vec4 getVec4(int index, DoubleBuffer vertices,
+			Vec4 referenceCenter)
+	{
+		return new Vec4(vertices.get(index * 3) + referenceCenter.x, vertices
+				.get(index * 3 + 1)
+				+ referenceCenter.y, vertices.get(index * 3 + 2)
+				+ referenceCenter.z);
+	}
+
+	private static void copyNormalInBuffer(int srcIndex, int dstIndex,
+			DoubleBuffer normals)
+	{
+		normals.put(dstIndex * 3, normals.get(srcIndex * 3));
+		normals.put(dstIndex * 3 + 1, normals.get(srcIndex * 3 + 1));
+		normals.put(dstIndex * 3 + 2, normals.get(srcIndex * 3 + 2));
+	}
+
+
+//computes normals for the triangle strip
+protected static java.nio.DoubleBuffer getNormals(int density,
+                DoubleBuffer vertices, java.nio.IntBuffer indices,
+                Vec4 referenceCenter)
+{
+        int side = density + 3;
+        int numVertices = side * side;
+        int numFaces = indices.limit() - 2;
+        double centerX = referenceCenter.x;
+        double centerY = referenceCenter.y;
+        double centerZ = referenceCenter.z;
+        // Create normal buffer
+        java.nio.DoubleBuffer normals = BufferUtil
+                        .newDoubleBuffer(numVertices * 3);
+        int[] counts = new int[numVertices];
+        Vec4[] norms = new Vec4[numVertices];
+        for (int i = 0; i < numVertices; i++)
+                norms[i] = new Vec4(0d);
+
+        for (int i = 0; i < numFaces; i++)
+        {
+                //get vertex indices
+                int index0 = indices.get(i);
+                int index1 = indices.get(i + 1);
+                int index2 = indices.get(i + 2);
+
+                //get verts involved in current face
+                Vec4 v0 = new Vec4(vertices.get(index0 * 3) + centerX, vertices
+                                .get(index0 * 3 + 1)
+                                + centerY, vertices.get(index0 * 3 + 2) + centerZ);
+
+                Vec4 v1 = new Vec4(vertices.get(index1 * 3) + centerX, vertices
+                                .get(index1 * 3 + 1)
+                                + centerY, vertices.get(index1 * 3 + 2) + centerZ);
+
+                Vec4 v2 = new Vec4(vertices.get(index2 * 3) + centerX, vertices
+                                .get(index2 * 3 + 1)
+                                + centerY, vertices.get(index2 * 3 + 2) + centerZ);
+
+                // get triangle edge vectors and plane normal
+                Vec4 e1 = v1.subtract3(v0), e2;
+                if (i % 2 == 0)
+                        e2 = v2.subtract3(v0);
+                else
+                        e2 = v0.subtract3(v2);
+                Vec4 N = e1.cross3(e2).normalize3(); // if N is 0, the triangle is degenerate
+
+    if (N.getLength3() > 0)
+    {
+        // Store the face's normal for each of the vertices that make up the face.
+        norms[index0] = norms[index0].add3(N);
+        norms[index1] = norms[index1].add3(N);
+        norms[index2] = norms[index2].add3(N);
+
+        //increment vertex normal counts
+        counts[index0]++;
+        counts[index1]++;
+        counts[index2]++;
+    }
+}
+
+        // Now loop through each vertex, and average out all the normals stored.
+        for (int i = 0; i < numVertices; i++)
+        {
+    if (counts[i] > 0)
+        norms[i] = norms[i].divide3(counts[i]).normalize3();
+                int index = i * 3;
+                normals.put(index++, norms[i].x).put(index++, norms[i].y).put(
+                                index, norms[i].z);
+        }
+
+        return normals;
+}
+
+ private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile tile, Plane[] planes)
+    {
+        tile.ri.vertices.rewind();
+        tile.ri.indices.rewind();
+
+        Vec4 offset = tile.ri.referenceCenter;
+        if (offset == null)
+            offset = new Vec4(0.0);
+
+        int trianglesNum = tile.ri.indices.capacity() - 2;
+
+        int[] indices = new int[3];
+        double[] coords = new double[3];
+
+        SectorGeometry.ExtractedShapeDescription clippedTriangleList = null;
+        for (int i = 0; i < trianglesNum; i++)
+        {
+            tile.ri.indices.position(i);
+            tile.ri.indices.get(indices);
+
+            if ((indices[0] == indices[1]) || (indices[0] == indices[2]) ||
+                (indices[1] == indices[2]))
+                // degenerate triangle
+                continue;
+            Vec4[] triVerts = new Vec4[3];
+            for (int j=0 ; j<3 ; j++)
+            {
+                tile.ri.vertices.position(3 * indices[j]);
+                tile.ri.vertices.get(coords);
+                triVerts[j] = new Vec4(coords[0] + offset.getX(),
+                    coords[1] + offset.getY(),
+                    coords[2] + offset.getZ(),1.0);
+            }
+            clippedTriangleList = addClippedPolygon(triVerts,planes,clippedTriangleList);
+        }
+        return clippedTriangleList;
+    }
+ 
+  private SectorGeometry.ExtractedShapeDescription addClippedPolygon(Vec4[] triVerts, Plane[] planes,
+        SectorGeometry.ExtractedShapeDescription l)
+    {
+        // Clip the polygon defined by polyVerts to the region defined by the intersection of
+        // the negative halfspaces in 'planes'. If there is a non-empty clipped result, then
+        // add it to the given list.
+        // This routine is (currently) only used to clip triangles in the current tessellation,
+        // but it is actually general enough for n-sided polygons. Best results will be
+        // obtained if the polygon is convex.
+
+        // ignore triangles on skirts
+        if (isSkirt(triVerts))
+            return l;
+
+        // We use a multi-pass Sutherland-Hodgman-style clipping algorithm.
+        // There is one pass for each clipping plane. We begin by copying the
+        // original vertices to local working storage.
+        Vec4[] polyVerts = new Vec4[3];
+        System.arraycopy(triVerts,0,polyVerts,0,3);
+
+        for (Plane p : planes)
+        {
+            polyVerts = doSHPass(p,polyVerts);
+            if (polyVerts == null)
+                // the polygon has been totally clipped away
+                return l;
+        }
+        // some part of the polygon survived. Store it in the list.
+        if (l ==  null)
+            l = new SectorGeometry.ExtractedShapeDescription(
+                    new ArrayList<Vec4[]>(), new ArrayList<SectorGeometry.BoundaryEdge>());
+        l.interiorPolys.add(polyVerts);
+        addBoundaryEdges(polyVerts,triVerts,l.shapeOutline);
+
+        return l;
+    }
+
+    private boolean isSkirt(Vec4[] triVerts)
+    {
+        Vec4 normal = globe.computeSurfaceNormalAtPoint(triVerts[0]);
+        // try to minimize numerical roundoff. The three triangle vertices
+        // are going to have coordinates with roughly the same magnitude,
+        // so we just sample triVerts[0].
+        double maxC = Math.max(Math.abs(triVerts[0].x),Math.abs(triVerts[0].y));
+        maxC = Math.max(maxC,Math.abs(triVerts[0].z));
+        Vec4 v0 = triVerts[0].divide3(maxC);
+        Vec4 u = triVerts[1].divide3(maxC).subtract3(v0);
+        Vec4 v = triVerts[triVerts.length-1].divide3(maxC).subtract3(v0);
+        Vec4 w = u.cross3(v).normalize3();
+        return (Math.abs(w.dot3(normal)) < 0.0001);
+    }
+
+  private Vec4[] doSHPass(Plane p, Vec4[] polyVerts)
+    {
+        // See comments in addClippedPolygon. Also note that, even if the
+        // original polygon is a triangle, the polygon here may have
+        // more than three vertices, depending on how it cuts the various
+        // planes whose volumetric intersection defines the clipping region.
+        ArrayList<Vec4> workingStorage = new ArrayList<Vec4>();
+        Vec4 startPnt = polyVerts[0];
+        boolean startPntIn = (p.dot(startPnt) <= 0.0);
+        for (int i=1 ; i<=polyVerts.length ; i++)
+        {
+            if (startPntIn)
+                workingStorage.add(startPnt);
+            Vec4 endPnt = polyVerts[i%polyVerts.length];
+            boolean endPntIn = (p.dot(endPnt) <= 0.0);
+            if (startPntIn != endPntIn)
+            {
+                // compute and store the intersection of this edge with p
+                Vec4[] clippedPnts;
+                if (startPntIn)
+                    clippedPnts = p.clip(startPnt,endPnt);
+                else
+                    clippedPnts = p.clip(endPnt,startPnt);
+                workingStorage.add(clippedPnts[0]);
+            }
+            // prepare for next edge
+            startPnt = endPnt;
+            startPntIn = endPntIn;
+        }
+        if (workingStorage.size() == 0)
+            return null;
+        Vec4[] verts = new Vec4[workingStorage.size()];
+        return workingStorage.toArray(verts);
+    }
+
+    private void addBoundaryEdges(Vec4[] polyVerts, Vec4[] triVerts,
+        ArrayList<SectorGeometry.BoundaryEdge> beList)
+    {
+        // each edge of polyVerts not coincident with an edge of the original
+        // triangle (triVerts) belongs to the outer boundary.
+        for (int i=0 ; i<polyVerts.length ; i++)
+        {
+            int j = (i + 1) % polyVerts.length;
+            if (!edgeOnTriangle(polyVerts[i],polyVerts[j],triVerts))
+                beList.add(new SectorGeometry.BoundaryEdge(polyVerts,i,j));
+        }
+    }
+
+    private boolean edgeOnTriangle(Vec4 a, Vec4 b, Vec4[] tri)
+    {
+        final double tol = 1.0e-4;
+        double[] coords_a = baryCentricCoordsRequireInside(a,tri);
+        double[] coords_b = baryCentricCoordsRequireInside(b,tri);
+        if ( (coords_a == null) || (coords_b == null) )
+            // mathematically not possible because 'a' and 'b' are
+            // known to be on edges of the triangle 'tri'.
+            return true;
+        for (int i=0 ; i<3 ; i++)
+            if ( (coords_a[i] < tol) && (coords_b[i] < tol) )
+                // 'a' and 'b' are on the same edge
+                return true;
+        return false;
+    }
+
+  private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile tile, Vec4 Cxyz,
+            Vec4 uHat, Vec4 vHat, double uRadius, double vRadius)
+    {
+        tile.ri.vertices.rewind();
+        tile.ri.indices.rewind();
+
+        Vec4 offset = tile.ri.referenceCenter;
+        if (offset == null)
+            offset = new Vec4(0.0);
+
+        int trianglesNum = tile.ri.indices.capacity() - 2;
+
+        int[] indices = new int[3];
+        double[] coords = new double[3];
+
+        SectorGeometry.ExtractedShapeDescription clippedTriangleList = null;
+        for (int i = 0; i < trianglesNum; i++)
+        {
+            tile.ri.indices.position(i);
+            tile.ri.indices.get(indices);
+
+            if ((indices[0] == indices[1]) || (indices[0] == indices[2]) ||
+                (indices[1] == indices[2]))
+                // degenerate triangle
+                continue;
+            Vec4[] triVerts = new Vec4[3];
+            for (int j=0 ; j<3 ; j++)
+            {
+                tile.ri.vertices.position(3 * indices[j]);
+                tile.ri.vertices.get(coords);
+                triVerts[j] = new Vec4(coords[0] + offset.getX(),
+                    coords[1] + offset.getY(),
+                    coords[2] + offset.getZ(),1.0);
+            }
+            clippedTriangleList = addClippedPolygon(triVerts,
+                Cxyz,uHat,vHat,uRadius,vRadius,clippedTriangleList);
+        }
+        return clippedTriangleList;
+    }
+
+  private SectorGeometry.ExtractedShapeDescription addClippedPolygon(Vec4[] polyVerts, Vec4 Cxyz,
+            Vec4 uHat, Vec4 vHat, double uRadius, double vRadius, SectorGeometry.ExtractedShapeDescription l)
+    {
+        // ignore triangles on skirts
+        if (isSkirt(polyVerts))
+            return l;
+
+        int i = 0, nInNegHalfspace = 0, locIn = -1, locOut = -1;
+        for (Vec4 vtx : polyVerts)
+        {
+            Vec4 vMinusC = vtx.subtract3(Cxyz);
+            double xd = vMinusC.dot3(uHat);
+            double yd = vMinusC.dot3(vHat);
+            double halfspaceEqn = (xd*xd)/(uRadius*uRadius) + (yd*yd)/(vRadius*vRadius) - 1.0;
+            if (halfspaceEqn <= 0.0)
+            {
+                locIn = i++;
+                nInNegHalfspace++;
+            }
+            else
+                locOut = i++;
+        }
+        SectorGeometry.BoundaryEdge be = new SectorGeometry.BoundaryEdge(null,-1,-1);
+        switch (nInNegHalfspace)
+        {
+            case 0: // check for edge intersections
+                polyVerts = checkForEdgeCylinderIntersections(polyVerts,Cxyz,uHat,vHat,
+                    uRadius,vRadius);
+                break;
+            case 1: // compute and return a trimmed triangle
+                if (locIn != 0)
+                {
+                    Vec4 h1 = polyVerts[locIn]; polyVerts[locIn] = polyVerts[0];
+                    polyVerts[0] = h1;
+                }
+                polyVerts = computeTrimmedPoly(polyVerts,Cxyz,uHat,vHat,uRadius,
+                    vRadius,nInNegHalfspace,be);
+                break;
+            case 2: // compute and return a trimmed quadrilateral
+                if (locOut != 0)
+                {
+                    Vec4 h2 = polyVerts[locOut]; polyVerts[locOut] = polyVerts[0];
+                    polyVerts[0] = h2;
+                }
+                polyVerts = computeTrimmedPoly(polyVerts,Cxyz,uHat,vHat,uRadius,
+                    vRadius,nInNegHalfspace,be);
+                break;
+            case 3: // triangle completely inside cylinder, so store it
+                break;
+        }
+        if (polyVerts == null)
+            return l;
+        if (l == null)
+            l = new SectorGeometry.ExtractedShapeDescription(new ArrayList<Vec4[]>(100),
+                new ArrayList<SectorGeometry.BoundaryEdge>(50));
+        l.interiorPolys.add(polyVerts);
+        if (be.vertices != null)
+            l.shapeOutline.add(be);
+        return l;
+    }
 
   private Vec4[] checkForEdgeCylinderIntersections(Vec4[] paramArrayOfVec4, Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, double paramDouble1, double paramDouble2)
   {
     return null;
   }
 
-  private Vec4[] computeTrimmedPoly(Vec4[] paramArrayOfVec4, Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, double paramDouble1, double paramDouble2, int paramInt, SectorGeometry.BoundaryEdge paramBoundaryEdge)
-  {
-    Vec4 localVec41 = intersectWithEllCyl(paramArrayOfVec4[0], paramArrayOfVec4[1], paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2);
-    Vec4 localVec42 = intersectWithEllCyl(paramArrayOfVec4[0], paramArrayOfVec4[2], paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2);
-    Vec4 localVec43 = localVec41.multiply3(0.5D).add3(localVec42.multiply3(0.5D));
-    if (paramInt == 1)
+   private Vec4[] computeTrimmedPoly(Vec4[] polyVerts, Vec4 Cxyz,
+            Vec4 uHat, Vec4 vHat, double uRadius, double vRadius, int nInside,
+            SectorGeometry.BoundaryEdge be)
     {
-      paramArrayOfVec4[1] = localVec41;
-      paramArrayOfVec4[2] = localVec42;
-      paramBoundaryEdge.vertices = paramArrayOfVec4;
-      paramBoundaryEdge.i1 = 1;
-      paramBoundaryEdge.i2 = 2;
-      paramBoundaryEdge.toMidPoint = localVec43.subtract3(paramArrayOfVec4[0]);
-      return paramArrayOfVec4;
-    }
-    Vec4[] arrayOfVec4 = new Vec4[4];
-    arrayOfVec4[0] = localVec41;
-    arrayOfVec4[1] = paramArrayOfVec4[1];
-    arrayOfVec4[2] = paramArrayOfVec4[2];
-    arrayOfVec4[3] = localVec42;
-    paramBoundaryEdge.vertices = arrayOfVec4;
-    paramBoundaryEdge.i1 = 0;
-    paramBoundaryEdge.i2 = 3;
-    paramBoundaryEdge.toMidPoint = paramArrayOfVec4[0].subtract3(localVec43);
-    return arrayOfVec4;
-  }
-
-  private Vec4 intersectWithEllCyl(Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, Vec4 paramVec44, Vec4 paramVec45, double paramDouble1, double paramDouble2)
-  {
-    Vec4 localVec41 = paramVec41.subtract3(paramVec43);
-    double d1 = localVec41.dot3(paramVec44);
-    double d2 = localVec41.dot3(paramVec45);
-    Vec4 localVec42 = paramVec42.subtract3(paramVec43);
-    double d3 = localVec42.dot3(paramVec44);
-    double d4 = localVec42.dot3(paramVec45);
-    double d5 = d3 - d1;
-    double d6 = d4 - d2;
-    double d7 = paramDouble1 * paramDouble1;
-    double d8 = paramDouble2 * paramDouble2;
-    double d9 = d5 * d5 / d7 + d6 * d6 / d8;
-    double d10 = 2.0D * (d1 * d5 / d7 + d2 * d6 / d8);
-    double d11 = d1 * d1 / d7 + d2 * d2 / d8 - 1.0D;
-    double d12 = Math.sqrt(d10 * d10 - 4.0D * d9 * d11);
-    double d13 = (-d10 + d12) / (2.0D * d9);
-    if ((d13 < 0.0D) || (d13 > 1.0D))
-      d13 = (-d10 - d12) / (2.0D * d9);
-    return paramVec41.multiply3(1.0D - d13).add3(paramVec42.multiply3(d13));
-  }
-
-    @Override
-    public long getUpdateFrequency() {
-        throw new UnsupportedOperationException("Not supported yet.");
+        // Either 1 or 2 vertices are inside the ellipse. If exactly 1 is inside, it is in position 0
+        // of the array. If exactly 1 is outside, it is in position 0 of the array.
+        // We therefore compute the points of intersection between the two edges [0]-[1] and [0]-[2]
+        // with the cylinder and return either a triangle or a quadrilateral.
+        Vec4 p1 = intersectWithEllCyl(polyVerts[0],polyVerts[1],Cxyz,uHat,vHat,uRadius,vRadius);
+        Vec4 p2 = intersectWithEllCyl(polyVerts[0],polyVerts[2],Cxyz,uHat,vHat,uRadius,vRadius);
+        Vec4 midP1P2 = p1.multiply3(0.5).add3(p2.multiply3(0.5));
+        if (nInside == 1)
+        {
+            polyVerts[1] = p1; polyVerts[2] = p2;
+            be.vertices = polyVerts; be.i1 = 1; be.i2 = 2; be.toMidPoint = midP1P2.subtract3(polyVerts[0]);
+            return polyVerts;
+        }
+        Vec4[] ret = new Vec4[4];
+        ret[0] = p1; ret[1] = polyVerts[1];
+        ret[2] = polyVerts[2]; ret[3] = p2;
+        be.vertices = ret; be.i1 = 0; be.i2 = 3; be.toMidPoint = polyVerts[0].subtract3(midP1P2);
+        return ret;
     }
 
-    @Override
-    public void setUpdateFrequency(long updateFrequency) {
-        throw new UnsupportedOperationException("Not supported yet.");
-    }
-
-  private static class CacheKey
-  {
-    private final Sector sector;
-    private final int density;
-    private final Object globeStateKey;
-
-    public CacheKey(DrawContext paramDrawContext, Sector paramSector, int paramInt)
+private Vec4 intersectWithEllCyl(Vec4 v0, Vec4 v1, Vec4 Cxyz,
+        Vec4 uHat, Vec4 vHat, double uRadius, double vRadius)
     {
-      this.sector = paramSector;
-      this.density = paramInt;
-      this.globeStateKey = paramDrawContext.getGlobe().getStateKey(paramDrawContext);
+        // Entry condition: one of (v0, v1) is inside the elliptical cylinder, and one is
+        // outside. We find 0<t<1 such that (1-t)*v0 + t*v1 is on the cylinder. We then return
+        // the corresponding point.
+
+        // First project v0 and v1 onto the plane of the ellipse
+        Vec4 v0MinusC = v0.subtract3(Cxyz);
+        double v0x = v0MinusC.dot3(uHat);
+        double v0y = v0MinusC.dot3(vHat);
+        Vec4 v1MinusC = v1.subtract3(Cxyz);
+        double v1x = v1MinusC.dot3(uHat);
+        double v1y = v1MinusC.dot3(vHat);
+
+        // Then compute the coefficients of the quadratic equation describing where
+        // the line segment (v0x,v0y)-(v1x,v1y) intersects the ellipse in the plane:
+        double v1xMinusV0x = v1x - v0x;
+        double v1yMinusV0y = v1y - v0y;
+        double uRsquared = uRadius * uRadius;
+        double vRsquared = vRadius * vRadius;
+
+        double a = v1xMinusV0x*v1xMinusV0x/uRsquared + v1yMinusV0y*v1yMinusV0y/vRsquared;
+        double b = 2.0 * (v0x*v1xMinusV0x/uRsquared + v0y*v1yMinusV0y/vRsquared);
+        double c = v0x*v0x/uRsquared + v0y*v0y/vRsquared - 1.0;
+
+        // now solve it
+        // if the entry condition is satsfied, the diuscriminant will not be negative...
+        double disc = Math.sqrt(b*b - 4.0*a*c);
+        double t = (-b + disc)/(2.0*a);
+        if ( (t < 0.0) || (t > 1.0) )
+            // need the other root
+            t = (-b - disc)/(2.0*a);
+
+        // the desired point is obtained by using the computed t with the original points
+        // v0 and v1:
+        return v0.multiply3(1.0-t).add3(v1.multiply3(t));
     }
 
-    public boolean equals(Object paramObject)
+      private static class CacheKey
     {
-      if (this == paramObject)
-        return true;
-      CacheKey localCacheKey = (CacheKey)paramObject;
-      if (this.density != localCacheKey.density)
-        return false;
-      if (this.globeStateKey != null ? !this.globeStateKey.equals(localCacheKey.globeStateKey) : localCacheKey.globeStateKey != null)
-        return false;
-      return this.sector != null ? this.sector.equals(localCacheKey.sector) : localCacheKey.sector == null;
-    }
+        private final Sector sector;
+        private final int density;
+        private final Object globeStateKey;
 
-    public int hashCode()
-    {
-      int i = this.sector != null ? this.sector.hashCode() : 0;
-      i = 31 * i + this.density;
-      i = 31 * i + (this.globeStateKey != null ? this.globeStateKey.hashCode() : 0);
-      return i;
+        public CacheKey(DrawContext dc, Sector sector, int density)
+        {
+            this.sector = sector;
+            this.density = density;
+            this.globeStateKey = dc.getGlobe().getStateKey(dc);
+        }
+
+        @SuppressWarnings({"EqualsWhichDoesntCheckParameterClass"})
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+
+            CacheKey cacheKey = (CacheKey) o; // Note: no check of class type equivalence, for performance
+
+            if (density != cacheKey.density) return false;
+            if (globeStateKey != null ? !globeStateKey.equals(cacheKey.globeStateKey) : cacheKey.globeStateKey != null)
+                return false;
+            //noinspection RedundantIfStatement
+            if (sector != null ? !sector.equals(cacheKey.sector) : cacheKey.sector != null) return false;
+
+            return true;
+        } 
+
+        public int hashCode()
+        {
+            int result;
+            result = (sector != null ? sector.hashCode() : 0);
+            result = 31 * result + density;
+            result = 31 * result + (globeStateKey != null ? globeStateKey.hashCode() : 0);
+            return result;
+        }
     }
-  }
   
   
 protected static final HashMap<Integer, Object> textureCoordVboCacheKeys = new HashMap<Integer, Object>();
@@ -1594,7 +2051,7 @@ protected static final HashMap<Integer, Object> textureCoordVboCacheKeys = new H
         
         
   
-  protected boolean bindVbos(DrawContext dc, RectTile tile, int numTextureUnits)
+      protected boolean bindVbos(DrawContext dc, RectTile tile, int numTextureUnits)
     {
         int[] verticesVboId = (int[]) dc.getGpuResourceCache().get(tile.ri.vboCacheKey);
         if (verticesVboId == null)
@@ -1640,6 +2097,7 @@ protected static final HashMap<Integer, Object> textureCoordVboCacheKeys = new H
 
         return indexListVboId != null;
     }
+      
 protected int[] fillIndexListVbo(DrawContext dc, int density, IntBuffer indices)
     {
         GL gl = dc.getGL();
