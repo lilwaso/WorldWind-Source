@@ -382,8 +382,11 @@ public class StarsLayer extends RenderableLayer
     {
         return this.radius;
     }
-    public void setRadius(double r)
+
+    public void setRadius(double radius)
     {
-        this.radius = r;
+        this.radius = Math.abs(radius);
+        this.rebuild = true;
     }
+    
 }
