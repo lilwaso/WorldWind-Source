@@ -874,4 +874,34 @@ public class BasicOrbitView extends BasicView implements OrbitView
     {
     return this.orbitViewModel;
     }
+    public double getAutoNearClipDistance()
+    {
+        Position eyePos = getCurrentEyePosition();
+        return computeNearDistance(eyePos);
+    }
+
+    public double getAutoFarClipDistance()
+    {
+        Position eyePos = getCurrentEyePosition();
+        return computeFarDistance(eyePos);
+    }
+        public double getNearClipDistance()
+    {
+        return this.nearClipDistance;
+    }
+
+    public void setNearClipDistance(double distance)
+    {
+        this.nearClipDistance = distance;
+    }
+
+    public double getFarClipDistance()
+    {
+        return this.farClipDistance;
+    }
+
+    public void setFarClipDistance(double distance)
+    {
+        this.farClipDistance = distance;
+    }
 }
