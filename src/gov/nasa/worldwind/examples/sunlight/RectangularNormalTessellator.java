@@ -59,29 +59,35 @@ import gov.nasa.worldwind.avlist.AVKey;
 public class RectangularNormalTessellator extends WWObjectImpl
   implements Tessellator
 {
-  private static final double DEFAULT_LOG10_RESOLUTION_TARGET = 1.3D;
-  private static final int DEFAULT_MAX_LEVEL = 12;
-  private static final int DEFAULT_NUM_LAT_SUBDIVISIONS = 5;
-  private static final int DEFAULT_NUM_LON_SUBDIVISIONS = 10;
-  private static final int DEFAULT_DENSITY = 20;
-  private static final String CACHE_NAME = "Terrain";
-  private static final String CACHE_ID = RectangularNormalTessellator.class.getName();
-  private static final HashMap<Integer, DoubleBuffer> parameterizations = new HashMap();
-  private static final HashMap<Integer, IntBuffer> indexLists = new HashMap();
-  private ArrayList<RectTile> topLevels;
-  private PickSupport pickSupport = new PickSupport();
-  private SectorGeometryList currentTiles = new SectorGeometryList();
-  private Frustum currentFrustum;
-  private Sector currentCoverage;
-  private boolean makeTileSkirts = true;
-  private int currentLevel;
-  private int maxLevel = 12;
-  private Globe globe;
-  private int density = 20;
-  private Vec4 lightDirection;
-  private Material material = new Material(Color.WHITE);
-  private Color lightColor = Color.WHITE;
-  private Color ambientColor = new Color(0.1F, 0.1F, 0.1F);
+	// TODO: Make all this configurable
+	private static final double DEFAULT_LOG10_RESOLUTION_TARGET = 1.3;
+	private static final int DEFAULT_MAX_LEVEL = 12;
+	private static final int DEFAULT_NUM_LAT_SUBDIVISIONS = 5;
+	private static final int DEFAULT_NUM_LON_SUBDIVISIONS = 10;
+	private static final int DEFAULT_DENSITY = 20;
+	private static final String CACHE_NAME = "Terrain";
+	private static final String CACHE_ID = RectangularNormalTessellator.class.getName();
+
+	// Tri-strip indices and texture coordinates. These depend only on density and can therefore be statically cached.
+	private static final HashMap<Integer, DoubleBuffer> parameterizations = new HashMap<Integer, DoubleBuffer>();
+	private static final HashMap<Integer, IntBuffer> indexLists = new HashMap<Integer, IntBuffer>();
+
+	private ArrayList<RectTile> topLevels;
+	private PickSupport pickSupport = new PickSupport();
+	private SectorGeometryList currentTiles = new SectorGeometryList();
+	private Frustum currentFrustum;
+	private Sector currentCoverage; // union of all tiles selected during call to render()
+	private boolean makeTileSkirts = true;
+	private int currentLevel;
+	private int maxLevel = DEFAULT_MAX_LEVEL;
+	private Globe globe;
+	private int density = DEFAULT_DENSITY;
+
+    // Lighting
+    private Vec4 lightDirection;
+    private Material material = new Material(Color.WHITE);
+    private Color lightColor = Color.WHITE;
+    private Color ambientColor = new Color(.1f, .1f, .1f);
   protected long updateFrequency = 2000; // milliseconds
   
   protected static final HashMap<Integer, Object> textureCoordVboCacheKeys = new HashMap<Integer, Object>();
@@ -184,8 +190,8 @@ private static class CacheKey
 
 		return this.currentTiles;
 	}
-
-	private ArrayList<RectTile> createTopLevelTiles(DrawContext dc)
+    
+private ArrayList<RectTile> createTopLevelTiles(DrawContext dc)
 	{
 		ArrayList<RectTile> tops = new ArrayList<RectTile>(
 				DEFAULT_NUM_LAT_SUBDIVISIONS * DEFAULT_NUM_LON_SUBDIVISIONS);
@@ -863,7 +869,7 @@ private static class CacheKey
 	}
 
 
-    /**
+     /**
      * Determines if and where a ray intersects a <code>RectTile</code> geometry.
      *
      * @param tile the <Code>RectTile</code> which geometry is to be tested for intersection.
@@ -1013,7 +1019,7 @@ private static class CacheKey
         return hits;
     }
 
-    /**
+   /**
      * Determines if and where a <code>RectTile</code> geometry intersects the globe ellipsoid at a given elevation.
      * The returned array of <code>Intersection</code> describes a list of individual segments - two
      * <code>Intersection</code> for each, corresponding to each geometry triangle that intersects the given elevation.
@@ -1814,7 +1820,7 @@ private static class CacheKey
 	}*/
 
 
-    private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile tile, Plane[] planes)
+private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile tile, Plane[] planes)
     {
         tile.ri.vertices.rewind();
         tile.ri.indices.rewind();
@@ -1967,7 +1973,7 @@ private static class CacheKey
                 return true;
         return false;
     }
-
+    
     private SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(RectTile tile, Vec4 Cxyz,
             Vec4 uHat, Vec4 vHat, double uRadius, double vRadius)
     {
@@ -2007,6 +2013,7 @@ private static class CacheKey
         }
         return clippedTriangleList;
     }
+    
     private SectorGeometry.ExtractedShapeDescription addClippedPolygon(Vec4[] polyVerts, Vec4 Cxyz,
             Vec4 uHat, Vec4 vHat, double uRadius, double vRadius, SectorGeometry.ExtractedShapeDescription l)
     {
@@ -2140,6 +2147,8 @@ private static class CacheKey
         // v0 and v1:
         return v0.multiply3(1.0-t).add3(v1.multiply3(t));
     }
+
+
     
     protected void renderTileID(DrawContext dc, RectTile tile)
     {
@@ -2331,79 +2340,85 @@ private static class CacheKey
     }
 
     public Sector getSector()
-    {
-      return this.sector;
-    }
+		{
+			return this.sector;
+		}
 
-    public Extent getExtent()
-    {
-      return this.extent;
-    }
+		public Extent getExtent()
+		{
+			return this.extent;
+		}
 
-    public void renderMultiTexture(DrawContext paramDrawContext, int paramInt)
-    {
-      this.tessellator.renderMultiTexture(paramDrawContext, this, paramInt);
-    }
+		public void renderMultiTexture(DrawContext dc, int numTextureUnits)
+		{
+			this.tessellator.renderMultiTexture(dc, this, numTextureUnits);
+		}
 
-    public void render(DrawContext paramDrawContext)
-    {
-      this.tessellator.render(paramDrawContext, this);
-    }
+		public void render(DrawContext dc)
+		{
+			this.tessellator.render(dc, this);
+		}
 
-    public void renderWireframe(DrawContext paramDrawContext, boolean paramBoolean1, boolean paramBoolean2)
-    {
-      this.tessellator.renderWireframe(paramDrawContext, this, paramBoolean1, paramBoolean2);
-    }
+		public void renderWireframe(DrawContext dc, boolean showTriangles,
+				boolean showTileBoundary)
+		{
+			this.tessellator.renderWireframe(dc, this, showTriangles,
+					showTileBoundary);
+		}
 
-    public void renderBoundingVolume(DrawContext paramDrawContext)
-    {
-      this.tessellator.renderBoundingVolume(paramDrawContext, this);
-    }
+		public void renderBoundingVolume(DrawContext dc)
+		{
+			this.tessellator.renderBoundingVolume(dc, this);
+		}
 
-    public PickedObject[] pick(DrawContext paramDrawContext, List<? extends Point> paramList)
-    {
-      return this.tessellator.pick(paramDrawContext, this, paramList);
-    }
+		public PickedObject[] pick(DrawContext dc, List<? extends Point> pickPoints)
+		{
+			return this.tessellator.pick(dc, this, pickPoints);
+		}
 
-    public void pick(DrawContext paramDrawContext, Point paramPoint)
-    {
-      this.tessellator.pick(paramDrawContext, this, paramPoint);
-    }
+		public void pick(DrawContext dc, Point pickPoint)
+		{
+			this.tessellator.pick(dc, this, pickPoint);
+		}
 
-    public Vec4 getSurfacePoint(Angle paramAngle1, Angle paramAngle2, double paramDouble)
-    {
-      return this.tessellator.getSurfacePoint(this, paramAngle1, paramAngle2, paramDouble);
-    }
+		public Vec4 getSurfacePoint(Angle latitude, Angle longitude,
+				double metersOffset)
+		{
+			return this.tessellator.getSurfacePoint(this, latitude, longitude,
+					metersOffset);
+		}
 
-    public double getResolution()
-    {
-      return this.sector.getDeltaLatRadians() / this.density;
-    }
+        public double getResolution()
+        {
+            return this.sector.getDeltaLatRadians() / this.density;
+        }
 
-    public Intersection[] intersect(Line paramLine)
-    {
-      return this.tessellator.intersect(this, paramLine);
-    }
+        public Intersection[] intersect(Line line)
+        {
+            return this.tessellator.intersect(this, line);
+        }
 
-    public Intersection[] intersect(double paramDouble)
-    {
-      return this.tessellator.intersect(this, paramDouble);
-    }
+        public Intersection[] intersect(double elevation)
+        {
+            return this.tessellator.intersect(this,elevation);
+        }
 
-    public DoubleBuffer makeTextureCoordinates(SectorGeometry.GeographicTextureCoordinateComputer paramGeographicTextureCoordinateComputer)
-    {
-      return this.tessellator.makeGeographicTexCoords(this, paramGeographicTextureCoordinateComputer);
-    }
+        public DoubleBuffer makeTextureCoordinates(GeographicTextureCoordinateComputer computer)
+        {
+            return this.tessellator.makeGeographicTexCoords(this, computer);
+        }
 
-    public SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(Plane[] paramArrayOfPlane)
-    {
-      return this.tessellator.getIntersectingTessellationPieces(this, paramArrayOfPlane);
-    }
+        public ExtractedShapeDescription getIntersectingTessellationPieces(Plane[] p)
+        {
+            return this.tessellator.getIntersectingTessellationPieces(this,p);
+        }
 
-    public SectorGeometry.ExtractedShapeDescription getIntersectingTessellationPieces(Vec4 paramVec41, Vec4 paramVec42, Vec4 paramVec43, double paramDouble1, double paramDouble2)
-    {
-      return this.tessellator.getIntersectingTessellationPieces(this, paramVec41, paramVec42, paramVec43, paramDouble1, paramDouble2);
-    }
+        public ExtractedShapeDescription getIntersectingTessellationPieces(Vec4 Cxyz,
+            Vec4 uHat, Vec4 vHat, double uRadius, double vRadius)
+        {
+            return this.tessellator.getIntersectingTessellationPieces(this,Cxyz,
+                uHat,vHat,uRadius,vRadius);
+        }
 
         
         public void beginRendering(DrawContext dc, int numTextureUnits)
